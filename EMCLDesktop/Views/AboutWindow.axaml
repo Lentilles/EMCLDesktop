@@ -8,11 +8,14 @@
         <StyleInclude Source="/Styles/CommonStyles.axaml" />
     </Window.Styles>
     <StackPanel Margin="28" Spacing="20">
-        <StackPanel Spacing="6">
-            <TextBlock Text="EMCL Desktop" FontSize="28" FontWeight="SemiBold"
-                       Foreground="#F4F7FC" />
-            <TextBlock x:Name="VersionText" Foreground="#69C4E1" />
-        </StackPanel>
+        <Grid ColumnDefinitions="72,*" ColumnSpacing="12">
+            <Image Source="/Assets/emcl-desktop.png" Width="72" Height="72" />
+            <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                <TextBlock Text="EMCL Desktop" FontSize="28" FontWeight="SemiBold"
+                           Foreground="#F4F7FC" />
+                <TextBlock x:Name="VersionText" Foreground="#69C4E1" />
+            </StackPanel>
+        </Grid>
         <TextBlock Text="Чтение счётчиков DLMS/COSEM, просмотр объектов и профилей, анализ пакетов и трассировка обмена."
                    Classes="muted" />
         <StackPanel Spacing="4">

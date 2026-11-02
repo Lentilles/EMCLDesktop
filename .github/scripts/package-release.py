@@ -34,6 +34,7 @@ def package(args):
             binaries = contents / "MacOS"
             resources = contents / "Resources"
             resources.mkdir(parents=True)
+            shutil.copy2(root / "EMCLDesktop/Assets/emcl-desktop.icns", resources / "emcl-desktop.icns")
             shutil.copytree(publish, binaries)
             (binaries / executable).chmod(0o755)
             with (contents / "Info.plist").open("wb") as stream:
@@ -42,6 +43,7 @@ def package(args):
                     "CFBundleIdentifier": "com.lentilles.emcldesktop",
                     "CFBundleName": "EMCL Desktop",
                     "CFBundleDisplayName": "EMCL Desktop",
+                    "CFBundleIconFile": "emcl-desktop.icns",
                     "CFBundlePackageType": "APPL",
                     "CFBundleInfoDictionaryVersion": "6.0",
                     "CFBundleShortVersionString": args.version.split("-")[0],
@@ -53,6 +55,7 @@ def package(args):
             shutil.copytree(publish, stage, dirs_exist_ok=True)
             if args.rid.startswith("linux-"):
                 (stage / executable).chmod(0o755)
+                shutil.copy2(root / "EMCLDesktop/Assets/emcl-desktop.png", stage / "emcl-desktop.png")
             documentation = stage
 
         shutil.copy2(root / "README.md", documentation / "README.md")
