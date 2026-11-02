@@ -1,0 +1,173 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  AVALONIA_TELEMETRY_OPTOUT: '1'
+  # Update this SHA deliberately when upgrading the library.
+  EMCL_REF: 83f904ac831e00c071800179866d0c3ab457eb17
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-2025
+          - rid: win-arm64
+            runner: windows-11-arm
+          - rid: linux-x64
+            runner: ubuntu-24.04
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+          - rid: osx-x64
+            runner: macos-15-intel
+          - rid: osx-arm64
+            runner: macos-15
+    defaults:
+      run:
+        shell: bash
+        working-directory: EMCLDesktop
+    steps:
+      - name: Check out desktop application
+        uses: actions/checkout@v6
+        with:
+          path: EMCLDesktop
+          persist-credentials: false
+
+      - name: Check out pinned EMCL dependency
+        uses: actions/checkout@v6
+        with:
+          repository: Lentilles/EMCL
+          ref: ${{ env.EMCL_REF }}
+          path: EMCL
+          token: ${{ secrets.EMCL_READ_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Select version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo 'Expected a version tag such as v1.2.3 or v1.2.3-rc.1' >&2
+              exit 1
+            fi
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Run checks on native architecture
+        run: dotnet run --project Tests/TraceChecks/TraceChecks.csproj -c Release
+
+      - name: Publish self-contained application
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+          APP_RID: ${{ matrix.rid }}
+        run: |
+          dotnet publish EMCLDesktop.Desktop/EMCLDesktop.Desktop.csproj \
+            -c Release -r "$APP_RID" --self-contained true \
+            -p:Version="$APP_VERSION" -p:PublishTrimmed=false \
+            -p:DebugType=None -p:DebugSymbols=false \
+            -o artifacts/publish
+
+      - name: Package release
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+          APP_RID: ${{ matrix.rid }}
+        run: |
+          python .github/scripts/package-release.py \
+            --rid "$APP_RID" --version "$APP_VERSION" \
+            --publish artifacts/publish --output artifacts/release --emcl ../EMCL
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.rid }}
+          path: EMCLDesktop/artifacts/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download all six packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: package-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify packages and calculate checksums
+        working-directory: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          files=(
+            "EMCLDesktop-${version}-win-x64.zip"
+            "EMCLDesktop-${version}-win-arm64.zip"
+            "EMCLDesktop-${version}-linux-x64.tar.gz"
+            "EMCLDesktop-${version}-linux-arm64.tar.gz"
+            "EMCLDesktop-${version}-osx-x64.dmg"
+            "EMCLDesktop-${version}-osx-arm64.dmg"
+          )
+          for file in "${files[@]}"; do
+            test -s "$file"
+          done
+          sha256sum "${files[@]}" > SHA256SUMS
+
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo 'This release is already published; its assets will not be replaced.'
+              exit 0
+            fi
+            gh release upload "$RELEASE_TAG" release/* --clobber
+            gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
+          else
+            gh release create "$RELEASE_TAG" release/* \
+              --verify-tag --title "EMCL Desktop $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi
