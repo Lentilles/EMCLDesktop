@@ -8,6 +8,8 @@ namespace EMCLDesktop;
 
 public partial class App : Application
 {
+    private AboutWindow? aboutWindow;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -39,5 +41,35 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private async void AboutMenuItemClick(object? sender, System.EventArgs e)
+    {
+        if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime
+            { MainWindow: { IsVisible: true } owner })
+            return;
+
+        if (aboutWindow is not null)
+        {
+            aboutWindow.Activate();
+            return;
+        }
+
+        try
+        {
+            aboutWindow = new AboutWindow();
+            await aboutWindow.ShowDialog(owner);
+        }
+        finally
+        {
+            aboutWindow = null;
+        }
+    }
+
+    private async void ConnectionSettingsMenuItemClick(object? sender, System.EventArgs e)
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
+            { MainWindow.Content: MainView mainView })
+            await mainView.OpenConnectionSettingsAsync();
     }
 }

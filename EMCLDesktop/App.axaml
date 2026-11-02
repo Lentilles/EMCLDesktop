@@ -2,7 +2,17 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:EMCLDesktop"
              x:Class="EMCLDesktop.App"
+             Name="EMCL Desktop"
              RequestedThemeVariant="Dark">
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="О программе EMCL Desktop…" Click="AboutMenuItemClick" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Параметры подключения…" Gesture="Meta+OemComma"
+                            Click="ConnectionSettingsMenuItemClick" />
+        </NativeMenu>
+    </NativeMenu.Menu>
+
     <Application.DataTemplates>
         <local:ViewLocator />
     </Application.DataTemplates>

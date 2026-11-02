@@ -6,6 +6,8 @@ The desktop project targets Windows, Linux, and macOS. Android, iOS, and Browser
 
 The application UI is currently in Russian. Control names in this guide are English translations of the corresponding UI labels.
 
+On macOS, the **EMCL Desktop** application menu includes About and Connection settings (**⌘,**), alongside the standard system commands. The **File** menu provides Load (**⌘O**) and Save (**⌘S**), using the same configuration dialogs as the Objects tab.
+
 ## Features
 
 - TCP and serial connections with Wrapper / HDLC framing.

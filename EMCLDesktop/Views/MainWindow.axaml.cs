@@ -13,6 +13,27 @@ public partial class MainWindow : Window
         InitializeComponent();
     }
 
+    private void FileMenuNeedsUpdate(object? sender, System.EventArgs e)
+    {
+        bool canEdit = IsEnabled && DataContext is MainViewModel { CanEditConfiguration: true };
+        if (sender is NativeMenu menu)
+            foreach (var item in menu.Items)
+                if (item is NativeMenuItem action)
+                    action.IsEnabled = canEdit;
+    }
+
+    private async void LoadConfigurationMenuItemClick(object? sender, System.EventArgs e)
+    {
+        if (Content is MainView mainView)
+            await mainView.LoadConfigurationAsync();
+    }
+
+    private async void SaveConfigurationMenuItemClick(object? sender, System.EventArgs e)
+    {
+        if (Content is MainView mainView)
+            await mainView.SaveConfigurationAsync();
+    }
+
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         base.OnClosing(e);

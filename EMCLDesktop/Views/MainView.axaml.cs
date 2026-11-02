@@ -17,7 +17,10 @@ public partial class MainView : UserControl
         InitializeComponent();
     }
 
-    private async void OpenConnectionSettingsClick(object? sender, RoutedEventArgs e)
+    private async void OpenConnectionSettingsClick(object? sender, RoutedEventArgs e) =>
+        await OpenConnectionSettingsAsync();
+
+    public async System.Threading.Tasks.Task OpenConnectionSettingsAsync()
     {
         if (DataContext is not MainViewModel viewModel || !viewModel.CanEditConfiguration ||
             connectionSettingsWindow is not null || TopLevel.GetTopLevel(this) is not Window owner)
@@ -38,7 +41,10 @@ public partial class MainView : UserControl
         }
     }
 
-    private async void LoadConfigurationClick(object? sender, RoutedEventArgs e)
+    private async void LoadConfigurationClick(object? sender, RoutedEventArgs e) =>
+        await LoadConfigurationAsync();
+
+    public async System.Threading.Tasks.Task LoadConfigurationAsync()
     {
         var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
         if (storage is null || DataContext is not MainViewModel viewModel ||
@@ -61,7 +67,10 @@ public partial class MainView : UserControl
         }
     }
 
-    private async void SaveConfigurationClick(object? sender, RoutedEventArgs e)
+    private async void SaveConfigurationClick(object? sender, RoutedEventArgs e) =>
+        await SaveConfigurationAsync();
+
+    public async System.Threading.Tasks.Task SaveConfigurationAsync()
     {
         var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
         if (storage is null || DataContext is not MainViewModel viewModel ||
