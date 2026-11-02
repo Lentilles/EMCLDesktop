@@ -1,0 +1,11 @@
+<Solution>
+  <Project Path="EMCLDesktop.Android/EMCLDesktop.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="EMCLDesktop.Browser/EMCLDesktop.Browser.csproj" />
+  <Project Path="EMCLDesktop.Desktop/EMCLDesktop.Desktop.csproj" />
+  <Project Path="EMCLDesktop.iOS/EMCLDesktop.iOS.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="EMCLDesktop/EMCLDesktop.csproj" />
+</Solution>

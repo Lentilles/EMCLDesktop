@@ -1,0 +1,500 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EMCLDesktop.ViewModels"
+             xmlns:views="using:EMCLDesktop.Views"
+             x:Class="EMCLDesktop.Views.MainView"
+             x:DataType="vm:MainViewModel">
+    <UserControl.Styles>
+        <StyleInclude Source="/Styles/CommonStyles.axaml" />
+        <Style Selector="Button.connection-action">
+            <Setter Property="Background" Value="#2C81A5" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="MinWidth" Value="124" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.connection-action.connected">
+            <Setter Property="Background" Value="#22344C" />
+            <Setter Property="BorderBrush" Value="#31435B" />
+        </Style>
+        <Style Selector="Button.connection-action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A7898" />
+            <Setter Property="BorderBrush" Value="#A5E8FA" />
+        </Style>
+        <Style Selector="Button.connection-action.connected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#273B53" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+        <Style Selector="Button.connection-action:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1D526C" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+        <Style Selector="Button.connection-action:disabled">
+            <Setter Property="Opacity" Value="0.55" />
+            <Setter Property="Cursor" Value="Arrow" />
+        </Style>
+        <Style Selector="StackPanel.connection-status Ellipse">
+            <Setter Property="Fill" Value="#8296AE" />
+        </Style>
+        <Style Selector="StackPanel.connection-status TextBlock">
+            <Setter Property="Foreground" Value="#ACBED3" />
+        </Style>
+        <Style Selector="StackPanel.connection-status.connected Ellipse">
+            <Setter Property="Fill" Value="#8EE4BC" />
+        </Style>
+        <Style Selector="StackPanel.connection-status.connected TextBlock">
+            <Setter Property="Foreground" Value="#8EE4BC" />
+        </Style>
+        <Style Selector="StackPanel.connection-status.changing Ellipse">
+            <Setter Property="Fill" Value="#69C4E1" />
+        </Style>
+        <Style Selector="StackPanel.connection-status.changing TextBlock">
+            <Setter Property="Foreground" Value="#69C4E1" />
+        </Style>
+        <Style Selector="Button.object-row">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.object-row /template/ ContentPresenter#PART_ContentPresenter,
+                         Button.object-row:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.object-row:pointerover">
+            <Setter Property="Foreground" Value="#A5E8FA" />
+        </Style>
+        <Style Selector="Button.object-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#273B53" />
+        </Style>
+        <Style Selector="Button.object-row:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#214A61" />
+        </Style>
+        <Style Selector="Button.object-row.selected">
+            <Setter Property="Foreground" Value="#69C4E1" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Expander.object-group">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Expander.object-group /template/ Border#ExpanderContent">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Expander.object-group /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="TabItem">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Padding" Value="14,10" />
+        </Style>
+        <Style Selector="TextBox.trace-output:focus-within /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="#172438" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid Margin="12">
+        <TabControl SelectedIndex="{Binding SelectedTabIndex}" Background="Transparent">
+            <TabItem Header="Объекты">
+                <Grid Margin="0,8,0,0" RowDefinitions="Auto,*,Auto" RowSpacing="10">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+                        <Button Classes="secondary" Content="Параметры подключения"
+                                Click="OpenConnectionSettingsClick" IsEnabled="{Binding CanEditConfiguration}" />
+                        <Button Classes="secondary" Content="Загрузить"
+                                Click="LoadConfigurationClick" IsEnabled="{Binding CanEditConfiguration}" />
+                        <Button Classes="secondary" Content="Сохранить"
+                                Click="SaveConfigurationClick" IsEnabled="{Binding CanEditConfiguration}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" ColumnDefinitions="360,*" ColumnSpacing="16">
+                        <Border Grid.Column="0" Classes="panel" Padding="0">
+                            <Grid RowDefinitions="Auto,Auto,*">
+                                <StackPanel Grid.Row="0" Spacing="12" Margin="16,16,16,12">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Grid.Column="0" Text="Каталог OBIS" Classes="section-title" />
+                                        <TextBlock Grid.Column="1" Text="{Binding VisibleObjectCount}"
+                                                   Foreground="#69C4E1" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Button Content="Считать дерево" Classes="secondary"
+                                            Command="{Binding ReadTreeCommand}" HorizontalAlignment="Stretch" />
+                                    <TextBox Text="{Binding SearchText}" PlaceholderText="OBIS, класс или ID" />
+                                    <CheckBox Content="Регулярное выражение" IsChecked="{Binding UseRegularExpression}" />
+                                    <TextBlock Text="{Binding SearchError}" Foreground="#FF9E9E"
+                                               TextWrapping="Wrap" FontSize="12" />
+                                </StackPanel>
+                                <Border Grid.Row="1" Height="1" Background="#293A52" />
+                                <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl ItemsSource="{Binding VisibleGroups}" Margin="10"
+                                                  HorizontalAlignment="Stretch"
+                                                  IsEnabled="{Binding CanSelectObjects}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ObjectGroupViewModel">
+                                                <Expander Classes="object-group" IsExpanded="True" Margin="0,0,0,10">
+                                                    <Expander.Header>
+                                                        <StackPanel Spacing="2">
+                                                            <TextBlock Text="{Binding ClassName}" FontWeight="SemiBold"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Subtitle}" Classes="muted" FontSize="11"
+                                                                       TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </Expander.Header>
+                                                    <ItemsControl ItemsSource="{Binding Objects}" HorizontalAlignment="Stretch">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:MeterObjectViewModel">
+                                                                <Button Classes="object-row"
+                                                                        Classes.selected="{Binding IsSelected}"
+                                                                        Click="SelectObjectClick">
+                                                                    <TextBlock Text="{Binding Obis}" FontSize="13"
+                                                                               TextWrapping="Wrap" />
+                                                                </Button>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Expander>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Column="1" Classes="panel" Padding="0">
+                            <Grid RowDefinitions="Auto,*">
+                                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="20,16">
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="Сведения об объекте" Classes="section-title" />
+                                        <TextBlock Text="Атрибуты, значения и методы" Classes="muted" FontSize="12" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Classes="primary" Content="Считать все атрибуты"
+                                            Command="{Binding ReadSelectedObjectCommand}"
+                                            VerticalAlignment="Center" />
+                                </Grid>
+                                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel Margin="20,0,20,20" Spacing="12">
+                                        <Border Height="1" Background="#293A52" />
+                                        <TextBlock Text="Выберите OBIS в каталоге. Значения читаются по кнопке."
+                                                   Classes="muted" Margin="0,24" TextAlignment="Center"
+                                                   IsVisible="{Binding HasNoSelectedObject}" />
+                                        <ContentControl Content="{Binding SelectedObject}">
+                                            <ContentControl.ContentTemplate>
+                                                <DataTemplate x:DataType="vm:MeterObjectViewModel">
+                                                    <StackPanel Spacing="18">
+                                                        <StackPanel Spacing="7">
+                                                            <TextBlock Text="{Binding Obis}" FontSize="24"
+                                                                       FontWeight="SemiBold" Foreground="#F4F7FC"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding ClassName}" FontSize="15"
+                                                                       Foreground="#69C4E1" TextWrapping="Wrap" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="16">
+                                                                <TextBlock Text="{Binding ClassId, StringFormat='Класс {0}'}"
+                                                                           Classes="muted" FontSize="12" />
+                                                                <TextBlock Text="{Binding ClassVersion, StringFormat='Версия {0}'}"
+                                                                           Classes="muted" FontSize="12" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                        <StackPanel Spacing="10">
+                                                            <TextBlock Text="Атрибуты" Classes="section-title" />
+                                                            <ItemsControl ItemsSource="{Binding Attributes}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate x:DataType="vm:AttributeViewModel">
+                                                                        <Border Classes="item" Margin="0,0,0,8">
+                                                                            <StackPanel Spacing="10">
+                                                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                                                        <TextBlock Text="{Binding Index, StringFormat='АТРИБУТ {0}'}"
+                                                                                                   FontSize="11" FontWeight="Bold"
+                                                                                                   Foreground="#69C4E1" />
+                                                                                        <TextBlock Text="{Binding Name}" FontSize="15"
+                                                                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                                                    </StackPanel>
+                                                                                    <Button Grid.Column="1" Classes="secondary" Content="Считать"
+                                                                                            IsEnabled="{Binding IsReadEnabled}"
+                                                                                            Click="ReadAttributeClick"
+                                                                                            VerticalAlignment="Center" />
+                                                                                </Grid>
+                                                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                                                                    <StackPanel Grid.Column="0" Spacing="3">
+                                                                                        <TextBlock Text="ТИП" Classes="field-label" />
+                                                                                        <TextBlock Text="{Binding Type}" TextWrapping="Wrap" />
+                                                                                    </StackPanel>
+                                                                                    <StackPanel Grid.Column="1" Spacing="3">
+                                                                                        <TextBlock Text="ДОСТУП" Classes="field-label" />
+                                                                                        <TextBlock Text="{Binding Access}" TextWrapping="Wrap" />
+                                                                                    </StackPanel>
+                                                                                </Grid>
+                                                                                <StackPanel Spacing="4">
+                                                                                    <TextBlock Text="ЗНАЧЕНИЕ" Classes="field-label" />
+                                                                                    <TextBox Text="{Binding Value, Mode=OneWay}"
+                                                                                             IsReadOnly="True" AcceptsReturn="True"
+                                                                                             TextWrapping="Wrap" MinHeight="42"
+                                                                                             MaxHeight="180"
+                                                                                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                </StackPanel>
+                                                                            </StackPanel>
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                        <Border Classes="item" IsVisible="{Binding IsProfileGeneric}">
+                                                            <StackPanel Spacing="12">
+                                                                <TextBlock Text="Таблица Profile Generic" Classes="section-title" />
+                                                                <TextBlock Text="Выберите способ чтения. Диапазон применяет сам счётчик."
+                                                                           Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                                                                <ComboBox ItemsSource="{Binding ProfileReadModes}"
+                                                                          SelectedItem="{Binding SelectedProfileReadMode}"
+                                                                          IsEnabled="{Binding IsProfileReadEnabled}"
+                                                                          HorizontalAlignment="Stretch" />
+                                                                <StackPanel Spacing="5" IsVisible="{Binding IsProfileCountMode}">
+                                                                    <TextBlock Text="Количество записей" Classes="field-label" />
+                                                                    <TextBox Text="{Binding ProfileCountText}"
+                                                                             PlaceholderText="10" IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                </StackPanel>
+                                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10"
+                                                                      IsVisible="{Binding IsProfileEntryRangeMode}">
+                                                                    <StackPanel Grid.Column="0" Spacing="5">
+                                                                        <TextBlock Text="С записи" Classes="field-label" />
+                                                                        <TextBox Text="{Binding ProfileFirstEntryText}"
+                                                                                 PlaceholderText="1" IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="1" Spacing="5">
+                                                                        <TextBlock Text="По запись" Classes="field-label" />
+                                                                        <TextBox Text="{Binding ProfileLastEntryText}"
+                                                                                 PlaceholderText="10" IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                                <StackPanel Spacing="8" IsVisible="{Binding IsProfileDateRangeMode}">
+                                                                    <TextBlock Text="Столбец времени" Classes="field-label" />
+                                                                    <ComboBox ItemsSource="{Binding ProfileCaptureColumns}"
+                                                                              SelectedItem="{Binding SelectedProfileCaptureColumn}"
+                                                                              IsEnabled="{Binding IsProfileReadEnabled}"
+                                                                              HorizontalAlignment="Stretch">
+                                                                        <ComboBox.ItemTemplate>
+                                                                            <DataTemplate x:DataType="vm:ProfileCaptureColumnViewModel">
+                                                                                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                                                                            </DataTemplate>
+                                                                        </ComboBox.ItemTemplate>
+                                                                    </ComboBox>
+                                                                    <TextBlock Text="Столбцы появятся после чтения capture_objects."
+                                                                               Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                                                                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                                                        <StackPanel Grid.Column="0" Spacing="5">
+                                                                            <TextBlock Text="С даты" Classes="field-label" />
+                                                                            <DatePicker SelectedDate="{Binding ProfileFromDate}"
+                                                                                        IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                        </StackPanel>
+                                                                        <StackPanel Grid.Column="1" Spacing="5">
+                                                                            <TextBlock Text="По дату" Classes="field-label" />
+                                                                            <DatePicker SelectedDate="{Binding ProfileToDate}"
+                                                                                        IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                        </StackPanel>
+                                                                    </Grid>
+                                                                    <StackPanel Spacing="5">
+                                                                        <TextBlock Text="Часовой пояс счётчика" Classes="field-label" />
+                                                                        <TextBox Text="{Binding ProfileTimeZone}" PlaceholderText="+03:00"
+                                                                                 IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                                <Button Content="Считать профиль" Click="ReadProfileClick"
+                                                                        IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                <TextBlock Text="{Binding ProfileTableStatus}" Classes="muted"
+                                                                           FontSize="12" />
+                                                                <ContentControl Content="{Binding ProfileTable}">
+                                                                    <ContentControl.ContentTemplate>
+                                                                        <DataTemplate x:DataType="vm:ProfileTableViewModel">
+                                                                            <StackPanel Spacing="8">
+                                                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                                                <TextBlock Grid.Column="0" Text="{Binding PageSummary}"
+                                                                                           Classes="muted" FontSize="12"
+                                                                                           VerticalAlignment="Center" />
+                                                                                <Button Grid.Column="1" Content="Назад" Classes="secondary"
+                                                                                        IsEnabled="{Binding CanPreviousPage}"
+                                                                                        Click="ProfilePreviousPageClick" />
+                                                                                <Button Grid.Column="2" Content="Далее" Classes="secondary"
+                                                                                        IsEnabled="{Binding CanNextPage}"
+                                                                                        Click="ProfileNextPageClick" />
+                                                                            </Grid>
+                                                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                                                          VerticalScrollBarVisibility="Disabled">
+                                                                                <StackPanel Spacing="0">
+                                                                                    <StackPanel Orientation="Horizontal">
+                                                                                        <Border Width="50" MinHeight="66"
+                                                                                                Background="#214A61" Padding="8"
+                                                                                                BorderBrush="#31435B" BorderThickness="1">
+                                                                                            <TextBlock Text="№" FontWeight="Bold" />
+                                                                                        </Border>
+                                                                                        <ItemsControl ItemsSource="{Binding Columns}">
+                                                                                            <ItemsControl.ItemsPanel>
+                                                                                                <ItemsPanelTemplate>
+                                                                                                    <StackPanel Orientation="Horizontal" />
+                                                                                                </ItemsPanelTemplate>
+                                                                                            </ItemsControl.ItemsPanel>
+                                                                                            <ItemsControl.ItemTemplate>
+                                                                                                <DataTemplate x:DataType="vm:ProfileColumnViewModel">
+                                                                                                    <Border Width="220" MinHeight="66"
+                                                                                                            Background="#214A61" Padding="8"
+                                                                                                            BorderBrush="#31435B" BorderThickness="1">
+                                                                                                        <StackPanel Spacing="3">
+                                                                                                            <TextBlock Text="{Binding Obis}"
+                                                                                                                       FontWeight="SemiBold"
+                                                                                                                       TextWrapping="Wrap" />
+                                                                                                            <TextBlock Text="{Binding Name}"
+                                                                                                                       Classes="muted" FontSize="12"
+                                                                                                                       TextWrapping="Wrap" />
+                                                                                                        </StackPanel>
+                                                                                                    </Border>
+                                                                                                </DataTemplate>
+                                                                                            </ItemsControl.ItemTemplate>
+                                                                                        </ItemsControl>
+                                                                                    </StackPanel>
+                                                                                    <ItemsControl ItemsSource="{Binding Rows}">
+                                                                                        <ItemsControl.ItemTemplate>
+                                                                                            <DataTemplate x:DataType="vm:ProfileRowViewModel">
+                                                                                                <StackPanel Orientation="Horizontal">
+                                                                                                    <Border Width="50" MinHeight="42" Padding="8"
+                                                                                                            Background="#172438"
+                                                                                                            BorderBrush="#31435B" BorderThickness="1">
+                                                                                                        <TextBlock Text="{Binding Number}"
+                                                                                                                   Classes="muted" />
+                                                                                                    </Border>
+                                                                                                    <ItemsControl ItemsSource="{Binding Cells}">
+                                                                                                        <ItemsControl.ItemsPanel>
+                                                                                                            <ItemsPanelTemplate>
+                                                                                                                <StackPanel Orientation="Horizontal" />
+                                                                                                            </ItemsPanelTemplate>
+                                                                                                        </ItemsControl.ItemsPanel>
+                                                                                                        <ItemsControl.ItemTemplate>
+                                                                                                            <DataTemplate x:DataType="vm:ProfileCellViewModel">
+                                                                                                                <Border Width="220" MinHeight="42"
+                                                                                                                        Padding="8" Background="#172438"
+                                                                                                                        BorderBrush="#31435B"
+                                                                                                                        BorderThickness="1">
+                                                                                                                    <TextBlock Text="{Binding Value}"
+                                                                                                                               TextWrapping="Wrap" />
+                                                                                                                </Border>
+                                                                                                            </DataTemplate>
+                                                                                                        </ItemsControl.ItemTemplate>
+                                                                                                    </ItemsControl>
+                                                                                                </StackPanel>
+                                                                                            </DataTemplate>
+                                                                                        </ItemsControl.ItemTemplate>
+                                                                                    </ItemsControl>
+                                                                                </StackPanel>
+                                                                            </ScrollViewer>
+                                                                            </StackPanel>
+                                                                        </DataTemplate>
+                                                                    </ContentControl.ContentTemplate>
+                                                                </ContentControl>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <StackPanel Spacing="10">
+                                                            <TextBlock Text="Методы" Classes="section-title" />
+                                                            <ItemsControl ItemsSource="{Binding Methods}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate x:DataType="vm:MethodViewModel">
+                                                                        <Border Classes="item" Margin="0,0,0,8">
+                                                                            <StackPanel Spacing="6">
+                                                                                <TextBlock Text="{Binding Index, StringFormat='МЕТОД {0}'}"
+                                                                                           FontSize="11" FontWeight="Bold"
+                                                                                           Foreground="#69C4E1" />
+                                                                                <TextBlock Text="{Binding Name}" FontSize="15"
+                                                                                           FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                                                <TextBlock Text="{Binding ParameterType}" Classes="muted" />
+                                                                                <TextBlock Text="{Binding Access}" TextWrapping="Wrap" />
+                                                                            </StackPanel>
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ContentControl.ContentTemplate>
+                                        </ContentControl>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                    <Border Grid.Row="2" Classes="panel" Padding="12,9">
+                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="#C9D8E8" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Classes="secondary" Content="Копировать" IsVisible="{Binding HasStatusError}"
+                                    ToolTip.Tip="Копировать текст ошибки" VerticalAlignment="Center" Click="CopyStatusClick" />
+                            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="5" Margin="0,8,0,0"
+                                        IsVisible="{Binding IsTreeReadInProgress}">
+                                <TextBlock Text="{Binding TreeReadProgressText}" Foreground="#69C4E1" FontSize="12" />
+                                <ProgressBar Minimum="0" Maximum="{Binding TreeReadProgressMaximum}" Value="{Binding TreeReadCurrent}"
+                                             IsIndeterminate="{Binding IsTreeReadIndeterminate}" Height="6" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Инспектор пакетов">
+                <views:PacketInspectorView DataContext="{Binding Inspector}" Margin="0,8,0,0" />
+            </TabItem>
+            <TabItem Header="Трассировка и экспорт">
+                <Border Classes="panel" Margin="0,8,0,0" Padding="12">
+                    <Border.Resources>
+                        <SolidColorBrush x:Key="ComboBoxBackground" Color="#22344C" />
+                        <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="#22344C" />
+                        <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#273B53" />
+                        <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#214A61" />
+                        <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#172438" />
+                        <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#31435B" />
+                        <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#273B53" />
+                        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#214A61" />
+                        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#214A61" />
+                    </Border.Resources>
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+                            <TextBlock Text="Формат" VerticalAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding TraceFormats}"
+                                      Grid.Column="1" HorizontalAlignment="Left"
+                                      SelectedIndex="{Binding SelectedTraceFormatIndex, Mode=TwoWay}"
+                                      MinWidth="250" Background="#22344C" BorderBrush="#31435B" Foreground="#E7EFF8" />
+                            <Button Grid.Column="2" Classes="secondary" Content="Копировать трассировку" Click="CopyTraceClick" />
+                            <Button Grid.Column="3" Classes="secondary" Content="Сохранить трассировку" Click="SaveTraceClick" />
+                        </Grid>
+                        <TextBlock Grid.Row="1" Classes="muted" FontSize="12"
+                                   Text="Весь обмен с запуска приложения. Формат применяется к просмотру, копированию и сохранению." />
+                        <TextBox Grid.Row="2" Classes="trace-output" Text="{Binding TraceText}" IsReadOnly="True"
+                                 Background="#0D1726" BorderBrush="#536F8B" BorderThickness="1" Foreground="#E7EFF8"
+                                 AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="monospace" FontSize="12" Padding="8" />
+                    </Grid>
+                </Border>
+            </TabItem>
+        </TabControl>
+
+        <StackPanel Orientation="Horizontal" Spacing="14" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,0,0">
+            <StackPanel Classes="connection-status" Classes.connected="{Binding IsConnected}"
+                        Classes.changing="{Binding IsConnectionChanging}" Orientation="Horizontal" Spacing="7"
+                        VerticalAlignment="Center" ToolTip.Tip="Состояние соединения со счётчиком">
+                <Ellipse Width="7" Height="7" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding ConnectionState}" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button Classes="connection-action" Classes.connected="{Binding IsConnected}"
+                    Content="{Binding ConnectionActionText}" Command="{Binding ToggleConnectionCommand}"
+                    ToolTip.Tip="{Binding ConnectionActionText}" AutomationProperties.Name="{Binding ConnectionActionText}" />
+        </StackPanel>
+
+    </Grid>
+</UserControl>

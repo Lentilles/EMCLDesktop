@@ -1,0 +1,200 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EMCLDesktop.ViewModels"
+             x:Class="EMCLDesktop.Views.ConnectionSettingsView"
+             x:DataType="vm:MainViewModel">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Spacing="16" MaxWidth="1120" HorizontalAlignment="Stretch">
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                <Border Grid.Column="0" Classes="panel">
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Подключение" Classes="section-title" />
+                            <TextBlock Text="Адрес прибора и параметры транспорта" Classes="muted" FontSize="12" />
+                        </StackPanel>
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Тип подключения" Classes="field-label" />
+                            <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <Grid ColumnDefinitions="2*,*" ColumnSpacing="12" IsVisible="{Binding IsTcp}">
+                            <StackPanel Grid.Column="0" Spacing="5">
+                                <TextBlock Text="IP / хост" Classes="field-label" />
+                                <TextBox Text="{Binding Host}" PlaceholderText="IP или имя хоста" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                                <TextBlock Text="TCP-порт" Classes="field-label" />
+                                <TextBox Text="{Binding TcpPort}" />
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Spacing="12" IsVisible="{Binding IsSerial}">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Serial-порт" Classes="field-label" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <ComboBox ItemsSource="{Binding SerialPortNames}" SelectedItem="{Binding SerialPortName}"
+                                              PlaceholderText="Выберите порт" HorizontalAlignment="Stretch" />
+                                    <Button Grid.Column="1" Content="Обновить" Command="{Binding RefreshSerialPortsCommand}" />
+                                </Grid>
+                                <TextBlock Text="{Binding SerialPortsStatus}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                <StackPanel Grid.Column="0" Spacing="5">
+                                    <TextBlock Text="BaudRate, бит/с" Classes="field-label" />
+                                    <TextBox Text="{Binding SerialBaudRate}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <TextBlock Text="DataBits" Classes="field-label" />
+                                    <ComboBox ItemsSource="{Binding SerialDataBitsOptions}" SelectedItem="{Binding SerialDataBits}"
+                                              HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                <StackPanel Grid.Column="0" Spacing="5">
+                                    <TextBlock Text="Parity" Classes="field-label" />
+                                    <ComboBox ItemsSource="{Binding SerialParities}" SelectedItem="{Binding SerialParity}"
+                                              HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <TextBlock Text="StopBits" Classes="field-label" />
+                                    <ComboBox ItemsSource="{Binding SerialStopBitsOptions}" SelectedItem="{Binding SerialStopBits}"
+                                              HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Handshake" Classes="field-label" />
+                                <ComboBox ItemsSource="{Binding SerialHandshakes}" SelectedItem="{Binding SerialHandshake}"
+                                          HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                            <WrapPanel>
+                                <CheckBox Content="DTR" IsChecked="{Binding SerialDtrEnable}" Margin="0,0,20,0" />
+                                <CheckBox Content="RTS" IsChecked="{Binding SerialRtsEnable}"
+                                          IsEnabled="{Binding CanSetSerialRts}"
+                                          ToolTip.Tip="При аппаратном Handshake линия RTS управляется автоматически." />
+                            </WrapPanel>
+                        </StackPanel>
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Кадрирование" Classes="field-label" />
+                            <ComboBox ItemsSource="{Binding Framings}" SelectedItem="{Binding Framing}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Classes="panel">
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Адресация" Classes="section-title" />
+                            <TextBlock Text="Адреса клиента и сервера для выбранного транспорта"
+                                       Classes="muted" FontSize="12" />
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <StackPanel Grid.Column="0" Spacing="5">
+                                <TextBlock Text="Клиент / Wrapper source" Classes="field-label" />
+                                <TextBox Text="{Binding ClientAddress}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                                <TextBlock Text="Сервер / Wrapper destination" Classes="field-label" />
+                                <TextBox Text="{Binding ServerAddress}" />
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Spacing="10" IsVisible="{Binding IsHdlc}">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="Физический адрес HDLC" Classes="field-label" />
+                                <TextBox Text="{Binding ServerPhysicalAddress}" />
+                            </StackPanel>
+                            <CheckBox Content="Расширенный HDLC-адрес"
+                                      IsChecked="{Binding ExtendedHdlcAddress}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Classes="panel">
+                <StackPanel Spacing="16">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Ассоциация и доступ" Classes="section-title" />
+                        <TextBlock Text="Укажите ассоциацию и способ аутентификации"
+                                   Classes="muted" FontSize="12" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="150,*,190" ColumnSpacing="12">
+                        <StackPanel Grid.Column="0" Spacing="5">
+                            <TextBlock Text="Версия Association LN" Classes="field-label" />
+                            <ComboBox ItemsSource="{Binding AssociationVersions}"
+                                      SelectedItem="{Binding AssociationVersion}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="OBIS ассоциации" Classes="field-label" />
+                            <TextBox Text="{Binding AssociationObis}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="5">
+                            <TextBlock Text="Аутентификация" Classes="field-label" />
+                            <ComboBox ItemsSource="{Binding Authentications}"
+                                      SelectedItem="{Binding Authentication}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid ColumnDefinitions="*,190" ColumnSpacing="12" IsVisible="{Binding HasPassword}">
+                        <StackPanel Grid.Column="0" Spacing="5">
+                            <TextBlock Text="Пароль или имя переменной окружения" Classes="field-label" />
+                            <TextBox Text="{Binding Password}" PasswordChar="●" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="Формат" Classes="field-label" />
+                            <ComboBox ItemsSource="{Binding PasswordFormats}"
+                                      SelectedItem="{Binding PasswordFormat}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel">
+                <StackPanel Spacing="16">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Параметры обмена" Classes="section-title" />
+                        <TextBlock Text="Ограничения соединения и возможности клиента"
+                                   Classes="muted" FontSize="12" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+                        <StackPanel Grid.Column="0" Spacing="5">
+                            <TextBlock Text="Открытие соединения, с" Classes="field-label" />
+                            <TextBox Text="{Binding ConnectTimeoutSeconds}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="Без обмена, с" Classes="field-label" />
+                            <TextBox Text="{Binding IdleTimeoutSeconds}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="5">
+                            <TextBlock Text="Максимальный PDU" Classes="field-label" />
+                            <TextBox Text="{Binding MaxReceivePduSize}" />
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="KeepAlive каждые, с" Classes="field-label" />
+                        <TextBox Text="{Binding KeepAliveIntervalSeconds}" Width="140"
+                                 HorizontalAlignment="Left" />
+                        <TextBlock Text="Во время простоя приложение коротко опрашивает Association LN. Чтение объектов не прерывается."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Spacing="7">
+                        <TextBlock Text="Conformance" Classes="field-label" />
+                        <ItemsControl ItemsSource="{Binding ConformanceOptions}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ConformanceOptionViewModel">
+                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}"
+                                              Margin="0,0,18,8" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <CheckBox Content="Пропускать одинаковые записи object_list"
+                              IsChecked="{Binding IgnoreIdenticalObjectListEntries}" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

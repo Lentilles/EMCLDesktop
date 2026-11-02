@@ -1,0 +1,42 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        <Style Selector="Border.panel">
+            <Setter Property="Background" Value="#172438" />
+            <Setter Property="BorderBrush" Value="#293A52" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+        <Style Selector="Border.item">
+            <Setter Property="Background" Value="#1C2B41" />
+            <Setter Property="BorderBrush" Value="#31435B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="14" />
+        </Style>
+        <Style Selector="TextBlock.section-title">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#F4F7FC" />
+        </Style>
+        <Style Selector="TextBlock.field-label">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="#ACBED3" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="TextBlock.muted">
+            <Setter Property="Foreground" Value="#ACBED3" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#2C81A5" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="20,11" />
+        </Style>
+        <Style Selector="Button.secondary">
+            <Setter Property="Background" Value="#22344C" />
+            <Setter Property="Foreground" Value="#E7EFF8" />
+            <Setter Property="Padding" Value="16,10" />
+        </Style>
+</Styles>
