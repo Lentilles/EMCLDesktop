@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using EMCL.Core.Objects;
 using EMCL.Core.Values;
 using EMCL.Objects.ProfileGeneric;
+using EMCLDesktop.Services;
 
 namespace EMCLDesktop.ViewModels;
 
@@ -84,6 +85,52 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public bool CanRead { get; } = canRead;
     [ObservableProperty] public partial bool IsReadEnabled { get; set; } = true;
     [ObservableProperty] public partial string Value { get; set; } = "Не считано";
+    public IReadOnlyList<DlmsType> WriteTypes => DlmsValueEditor.Types;
+    [ObservableProperty] public partial DlmsType? WriteType { get; set; } =
+        Enum.TryParse<DlmsType>(type, out var declaredType) ? declaredType : null;
+    [ObservableProperty] public partial string WriteText { get; set; } = "";
+    [ObservableProperty] public partial string WriteStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsWriteEnabled { get; set; }
+    [ObservableProperty] public partial string WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
+    [ObservableProperty] public partial bool CanUseReadValue { get; set; }
+    public DlmsValue? LastReadValue { get; private set; }
+    public string WriteHint => WriteType is { } selected
+        ? DlmsValueEditor.Hint(selected) : "Выберите тип. Для неизвестного типа сначала считайте значение или укажите тип вручную.";
+
+    partial void OnWriteTypeChanged(DlmsType? value)
+    {
+        OnPropertyChanged(nameof(WriteHint));
+        WriteStatus = "";
+    }
+    partial void OnWriteTextChanged(string value) => WriteStatus = "";
+
+    public void RememberReadValue(DlmsValue value)
+    {
+        LastReadValue = value;
+        CanUseReadValue = true;
+        if (WriteType is null) WriteType = value.Type;
+    }
+
+    public void ForgetReadValue()
+    {
+        LastReadValue = null;
+        CanUseReadValue = false;
+    }
+
+    public void UseReadValue()
+    {
+        if (LastReadValue is not { } value) return;
+        try
+        {
+            string text = DlmsValueEditor.Format(value);
+            WriteType = value.Type;
+            WriteText = text;
+        }
+        catch (Exception error)
+        {
+            WriteStatus = $"Не удалось подготовить значение: {error.Message}";
+        }
+    }
 }
 
 public sealed class ObjectGroupViewModel(string className, ushort classId, byte classVersion,

@@ -19,7 +19,7 @@ env:
   DOTNET_NOLOGO: '1'
   AVALONIA_TELEMETRY_OPTOUT: '1'
   # Update this SHA deliberately when upgrading the library.
-  EMCL_REF: 83f904ac831e00c071800179866d0c3ab457eb17
+  EMCL_REF: 88ca4a946d2055d0959b63ecb655a431dfddc35e
 
 jobs:
   build:

@@ -250,6 +250,7 @@ Check(serialTrace.Snapshot().Contains("Serial RX HEX") && serialTrace.Snapshot()
 Check(Tokens(serialTrace).SequenceEqual(Hex([.. rx, .. tx, 1])), "Serial tracing changed bytes");
 Console.WriteLine($"Passed {checks} trace and connection checks.");
 Console.WriteLine($"Passed {await PacketInspectionChecks.RunAsync()} packet inspector checks.");
+Console.WriteLine($"Passed {await AttributeWriteChecks.RunAsync()} attribute write checks.");
 
 sealed class FakeTransport(byte[] received) : IByteTransport
 {

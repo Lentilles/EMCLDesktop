@@ -168,6 +168,19 @@ public partial class MainView : UserControl
             await viewModel.ReadAttributeAsync(attribute);
     }
 
+    private async void WriteAttributeClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: AttributeViewModel attribute } &&
+            DataContext is MainViewModel viewModel)
+            await viewModel.WriteAttributeAsync(attribute);
+    }
+
+    private void UseReadValueClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: AttributeViewModel attribute })
+            attribute.UseReadValue();
+    }
+
     private async void ReadProfileClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { DataContext: MeterObjectViewModel obj } &&

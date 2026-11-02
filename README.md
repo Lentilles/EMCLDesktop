@@ -14,6 +14,7 @@ On macOS, the **EMCL Desktop** application menu includes About and Connection se
 - Association LN versions 1 and 3, with `None`, `Low`, and `High` authentication.
 - Object catalog searchable by OBIS, class name, and class ID, including regular expressions.
 - Read individual attributes, all attributes of an object, and Profile Generic tables.
+- Write typed attribute values with input validation and read-back after a confirmed SET.
 - Save connection settings and a catalog snapshot to JSON; browse the snapshot without a meter.
 - Packet inspector for the current connection and text HEX logs, with linked field and byte highlighting.
 - TCP/Serial traces in text and HEX formats, with clipboard copying and `.txt` export.
@@ -131,6 +132,16 @@ By default, **KeepAlive** reads the Association LN object's `logical_name` with 
 
 The catalog is grouped by COSEM class and version. Search covers OBIS, class name, and class ID; the **Regular expression** checkbox enables pattern matching. Object details show attributes, methods, types, and access rights. Read buttons remain available regardless of the preliminary access assessment: an actual meter rejection is displayed next to the attribute. For unknown classes, the attribute type is determined from a successful response. The duplicate-handling checkbox allows fully identical entries in `object_list` to be ignored.
 
+### Writing attributes
+
+Connect and read the tree for the current connection, then expand **Write value** (`Запись значения`) under an attribute. Choose the DLMS type, enter the new value, and click **Write to meter** (`Записать в счётчик`). **From read value** (`Из считанного`) copies the complete last response into the editor, including bytes and collection items omitted from the shortened display. Reads preserve an existing draft; drafts are not saved in configuration files. For an unknown type, read the attribute first or select its type explicitly.
+
+Integers use decimal notation; floating-point numbers use a decimal point. Numeric input is the raw wire value without scaler/unit conversion. Strings preserve whitespace. Octet strings and COSEM date/time values use HEX without a tag or length; the editor shows the required byte count. Arrays and structures use JSON lists of typed values, for example `[{"type":"Int8","value":-3},{"type":"Enum","value":30}]`. A nested array or structure has another list as its `value`. CompactArray uses the complete A-XDR value in HEX, including its tag.
+
+Writing requires negotiated `Set` Conformance and write access in the tree read from the current connection. Saved access rights alone do not enable writes. `logical_name` is read-only. Association LN v1 authenticated write access requires an authenticated connection; v3 rights requiring message protection are unavailable. The reason a write is unavailable appears in the editor.
+
+The application performs one SET exchange without retries and displays the meter's error code on refusal. After a successful reply, it reads the actual value back when the association allows reading; write-only values are marked as confirmed without presenting the draft as read data. A failed read-back is reported separately from a successful write. A lost SET reply leaves the outcome unconfirmed: read the value before deciding whether to write again. Writes share the operation lock with reads and KeepAlive. Values that exceed the complete normal PDU are transferred through the library using service-specific SET blocks when `BlockTransferWithSet` is selected and negotiated. A missing block capability or a local transfer limit is reported before the first send; a lost final block acknowledgement leaves the outcome unconfirmed. Message protection requirements in Association LN v3 still prevent writing.
+
 Profile Generic supports reading the entire buffer, the first or last N entries, an entry-number interval, or a date range. To read the last N entries, the application first reads `entries_in_use`. Date ranges use the time column from `capture_objects` and the meter's time zone. If `capture_objects` has not been retrieved yet, the application reads it automatically.
 
 Ranges are sent to the meter using DLMS selective access, which requires the negotiated `SelectiveAccess` Conformance flag. The table displays 100 rows per page and labels columns with the source OBIS and captured attribute name. Both regular arrays and compact arrays are supported.
@@ -176,14 +187,15 @@ Both HEX modes show the raw exchange without masking, including transmitted pass
 
 ## Limitations
 
-- Writing attributes and invoking methods are not yet implemented in the UI. SET/ACTION parsing in the inspector does not mean the application can send these requests.
+- Invoking methods is not yet implemented in the UI. ACTION parsing in the inspector does not mean the application can send these requests.
+- SET values must fit the negotiated PDU size; block transfer for SET and protected SET are not supported.
 - Association LN v3 access protection bits are displayed, but protected GET requests are not performed: the current EMCL client does not support encrypted or signed communication.
 - Large collections are shortened for display; decoding limits are controlled by EMCL.
 - The inspector does not decrypt protected APDUs; it shows raw bytes and diagnostics.
 
 ## Checks
 
-The repository includes a console check suite for tracing, transport idle timeouts, configurations, view models, profiles, and the packet inspector:
+The repository includes a console check suite for tracing, transport idle timeouts, configurations, view models, profiles, attribute writes, and the packet inspector:
 
 ```sh
 dotnet run --project Tests/TraceChecks/TraceChecks.csproj

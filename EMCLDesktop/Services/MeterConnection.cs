@@ -212,6 +212,63 @@ public sealed class MeterConnection : IAsyncDisposable
         return flags.HasFlag(AccessModeV3.Read) && (flags & protectedFlags) == 0;
     }
 
+    public static bool AllowsWrite(AttributeAccess? access, byte associationVersion,
+        ClientAuthentication authentication)
+    {
+        if (access is null) return false;
+        if (associationVersion == 1)
+        {
+            var mode = (AttributeAccessModeV1)access.RawMode;
+            return mode is AttributeAccessModeV1.WriteOnly or AttributeAccessModeV1.ReadWrite ||
+                authentication != ClientAuthentication.None &&
+                mode is AttributeAccessModeV1.AuthenticatedWriteOnly or AttributeAccessModeV1.AuthenticatedReadWrite;
+        }
+        // Every other v3 bit requires message protection that this client cannot send.
+        return associationVersion == 3 &&
+            ((AccessModeV3)access.RawMode is AccessModeV3.Write or (AccessModeV3.Write | AccessModeV3.Read));
+    }
+
+    public string WriteUnavailableReason(ushort classId, LogicalName obis, sbyte index)
+    {
+        if (!IsActive) return "Подключитесь к счётчику для записи.";
+        if ((session.NegotiatedParameters!.Conformance & DlmsConformance.Set) == 0)
+            return "SET не согласован со счётчиком. Включите Set в параметрах и подключитесь повторно.";
+        if (index == CosemObject.LogicalNameAttributeIndex)
+            return "logical_name доступен только для чтения.";
+        if (Association is null) return "Считайте дерево текущего соединения, чтобы проверить права записи.";
+        if (!Association.Catalog.Objects.Any(obj => obj.LogicalName == obis && obj.Descriptor.Key.ClassId == classId) ||
+            !Association.Access.Rights.TryGetValue(obis, out var rights))
+            return "Объект отсутствует в дереве текущего соединения.";
+        var access = rights.Attributes.FirstOrDefault(item => item.Index == index);
+        return AllowsWrite(access, options.AssociationVersion, authentication) ? "" :
+            "Ассоциация не разрешает запись либо требует неподдерживаемой защиты сообщений.";
+    }
+
+    public bool CanRead(LogicalName obis, sbyte index) =>
+        Association?.Access.Rights.TryGetValue(obis, out var rights) == true &&
+        CanRead(rights.Attributes.FirstOrDefault(item => item.Index == index));
+
+    public async Task WriteAsync(ushort classId, LogicalName obis, sbyte index, DlmsValue value,
+        CancellationToken cancellationToken = default)
+    {
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string reason = WriteUnavailableReason(classId, obis, index);
+            if (reason.Length != 0) throw new InvalidOperationException(reason);
+            _ = new EMCL.Protocol.Axdr.AxdrCodec(options.Limits).EncodeBytes(value);
+            // One SET exchange, using negotiated blocks when needed. No write or block is retried.
+            // DlmsWriteUnconfirmedException means the final outcome must be reconciled by reading.
+            await session.SetAsync(classId, obis, index, value, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            Volatile.Write(ref lastActivityTimestamp, Stopwatch.GetTimestamp());
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
     public async Task<DlmsValue> ReadAsync(ushort classId, LogicalName obis, sbyte index,
         SelectiveAccess? selection = null, CancellationToken cancellationToken = default)
     {

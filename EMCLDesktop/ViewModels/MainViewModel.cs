@@ -59,6 +59,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         new("Action", DlmsConformance.Action),
         new("SelectiveAccess", DlmsConformance.SelectiveAccess),
         new("BlockTransferWithGet", DlmsConformance.BlockTransferWithGet),
+        new("BlockTransferWithSet", DlmsConformance.BlockTransferWithSet),
         new("DataNotification", DlmsConformance.DataNotification),
         new("PriorityManagement", DlmsConformance.PriorityManagement)
     ];
@@ -574,7 +575,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (SelectedObject is null) return;
         bool canRead = !IsBusy && !IsReading;
         foreach (var attribute in SelectedObject.Attributes)
+        {
             attribute.IsReadEnabled = canRead;
+            attribute.WriteUnavailableReason = connection?.WriteUnavailableReason(
+                SelectedObject.ClassId, SelectedObject.LogicalName, attribute.Index)
+                ?? "Подключитесь к счётчику для записи.";
+            attribute.IsWriteEnabled = canRead && IsConnected && attribute.WriteUnavailableReason.Length == 0;
+        }
         SelectedObject.IsProfileReadEnabled = canRead;
     }
 
@@ -969,6 +976,101 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         return ReadAttributesAsync(obj, [attribute]);
     }
 
+    public async Task WriteAttributeAsync(AttributeViewModel attribute)
+    {
+        var obj = SelectedObject;
+        var meter = connection;
+        if (obj is null || !obj.Attributes.Contains(attribute) || IsBusy || IsReading) return;
+        string reason = meter?.WriteUnavailableReason(obj.ClassId, obj.LogicalName, attribute.Index)
+            ?? "Подключитесь к счётчику для записи.";
+        if (reason.Length != 0)
+        {
+            attribute.WriteStatus = reason;
+            ReportError(reason);
+            return;
+        }
+
+        DlmsValue value;
+        try
+        {
+            if (attribute.WriteType is not { } type)
+                throw new FormatException("Выберите тип записываемого значения.");
+            value = DlmsValueEditor.Parse(type, attribute.WriteText, limits);
+        }
+        catch (FormatException error)
+        {
+            attribute.WriteStatus = error.Message;
+            ReportError($"{obj.Obis}, атрибут {attribute.Index}: {error.Message}");
+            return;
+        }
+
+        int version = selectionVersion;
+        IsBusy = true;
+        attribute.WriteStatus = "Запись…";
+        Status = $"Запись {obj.Obis}: атрибут {attribute.Index}…";
+        try
+        {
+            await meter!.WriteAsync(obj.ClassId, obj.LogicalName, attribute.Index, value, shutdown.Token);
+            if (version != selectionVersion || meter != connection) return;
+            attribute.ForgetReadValue();
+            attribute.Value = "Запись подтверждена. Фактическое значение не считано.";
+            InvalidateProfileAfterWrite(obj, attribute);
+            attribute.WriteStatus = "Запись подтверждена счётчиком.";
+            if (meter.CanRead(obj.LogicalName, attribute.Index))
+            {
+                try
+                {
+                    var actual = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
+                        attribute.Index, cancellationToken: shutdown.Token);
+                    if (version != selectionVersion || meter != connection) return;
+                    ApplyReadResult(obj, attribute, actual);
+                    attribute.WriteStatus = "Запись подтверждена. Значение перечитано со счётчика.";
+                }
+                catch (Exception error)
+                {
+                    attribute.WriteStatus = $"Запись подтверждена, но перечитать значение не удалось: {error.Message}";
+                    ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
+                    return;
+                }
+            }
+            Status = $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}";
+        }
+        catch (Exception error)
+        {
+            if (version != selectionVersion || meter != connection) return;
+            if (error is not (DlmsOperationException or ArgumentException or InvalidOperationException or NotSupportedException))
+            {
+                attribute.ForgetReadValue();
+                attribute.Value = "Исход записи неизвестен. Перечитайте значение со счётчика.";
+                InvalidateProfileAfterWrite(obj, attribute);
+            }
+            attribute.WriteStatus = error switch
+            {
+                DlmsOperationException remote => $"Счётчик отклонил запись: {remote.Error} (код {(int)remote.Error}). {remote.Message}",
+                ArgumentException or InvalidOperationException or NotSupportedException => $"Запись не выполнена: {error.Message}",
+                _ => $"Запись не подтверждена: {error.Message}. Проверьте значение чтением перед повторной записью."
+            };
+            ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
+        }
+        finally
+        {
+            if (meter == connection && meter?.IsActive != true) IsConnected = false;
+            IsBusy = false;
+        }
+    }
+
+    private static void InvalidateProfileAfterWrite(MeterObjectViewModel obj, AttributeViewModel attribute)
+    {
+        if (!obj.IsProfileGeneric) return;
+        obj.ProfileBuffer = null;
+        obj.ProfileTable = null;
+        obj.ProfileTableStatus = "После записи перечитайте buffer и capture_objects.";
+        if (attribute.Index != ProfileGenericMembers.Attributes.CaptureObjects) return;
+        obj.ProfileCaptureObjects = null;
+        obj.ProfileCaptureColumns.Clear();
+        obj.SelectedProfileCaptureColumn = null;
+    }
+
     public async Task ReadProfileAsync(MeterObjectViewModel obj)
     {
         if (!obj.IsProfileGeneric || obj != SelectedObject || IsBusy || IsReading) return;
@@ -1164,6 +1266,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
     private void ApplyReadResult(MeterObjectViewModel obj, AttributeViewModel attribute, DlmsValue result)
     {
+        attribute.RememberReadValue(result);
         attribute.Value = DlmsDisplay.Value(result);
         if (!attribute.HasDeclaredType)
             attribute.Type = $"{result.Type} ({(byte)result.Type})";

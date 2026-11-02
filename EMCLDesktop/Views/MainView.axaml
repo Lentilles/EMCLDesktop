@@ -247,6 +247,30 @@
                                                                                              MaxHeight="180"
                                                                                              ScrollViewer.VerticalScrollBarVisibility="Auto" />
                                                                                 </StackPanel>
+                                                                                <Expander Header="Запись значения" HorizontalAlignment="Stretch"
+                                                                                          HorizontalContentAlignment="Stretch">
+                                                                                    <StackPanel Spacing="8" IsEnabled="{Binding IsReadEnabled}">
+                                                                                        <TextBlock Text="Тип для записи" Classes="field-label" />
+                                                                                        <ComboBox ItemsSource="{Binding WriteTypes}"
+                                                                                                  SelectedItem="{Binding WriteType, Mode=TwoWay}"
+                                                                                                  PlaceholderText="Выберите тип" MinWidth="180" />
+                                                                                        <TextBlock Text="{Binding WriteHint}" Classes="muted" FontSize="12" />
+                                                                                        <TextBox Text="{Binding WriteText, Mode=TwoWay}"
+                                                                                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                                                                                 MinHeight="70" MaxHeight="240"
+                                                                                                 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                        <WrapPanel Orientation="Horizontal">
+                                                                                            <Button Content="Из считанного" Classes="secondary" Margin="0,0,8,8"
+                                                                                                    IsEnabled="{Binding CanUseReadValue}"
+                                                                                                    Click="UseReadValueClick" />
+                                                                                            <Button Content="Записать в счётчик" Classes="primary" Margin="0,0,0,8"
+                                                                                                    IsEnabled="{Binding IsWriteEnabled}"
+                                                                                                    Click="WriteAttributeClick" />
+                                                                                        </WrapPanel>
+                                                                                        <TextBlock Text="{Binding WriteUnavailableReason}" Classes="muted" FontSize="12" />
+                                                                                        <TextBlock Text="{Binding WriteStatus}" TextWrapping="Wrap" Foreground="#69C4E1" />
+                                                                                    </StackPanel>
+                                                                                </Expander>
                                                                             </StackPanel>
                                                                         </Border>
                                                                     </DataTemplate>
