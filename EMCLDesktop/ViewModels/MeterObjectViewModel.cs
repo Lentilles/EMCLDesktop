@@ -76,7 +76,7 @@ public sealed record ProfileCaptureColumnViewModel(CaptureObject Capture, string
 }
 
 public sealed partial class AttributeViewModel(sbyte index, string? name, string? type,
-    string access, bool canRead) : ObservableObject
+    string access, bool canRead) : DlmsValuePreviewViewModel
 {
     private bool hasOpenedWriteEditor;
 
@@ -91,12 +91,8 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [NotifyPropertyChangedFor(nameof(DisplayedValue))]
     public partial string Value { get; set; } = "Не считано";
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayedValue))]
-    public partial OctetStringFormat? ReadOctetFormat { get; set; } = OctetStringFormat.Hex;
-    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WriteHint))]
     public partial OctetStringFormat WriteOctetFormat { get; private set; } = OctetStringFormat.Hex;
-    public IReadOnlyList<OctetStringFormat> ReadOctetFormats => OctetStringFormat.ReadOptions;
     public IReadOnlyList<OctetStringFormat> WriteOctetFormats => OctetStringFormat.Options;
     public IReadOnlyList<DlmsType> WriteTypes => DlmsValueEditor.Types;
     [ObservableProperty]
@@ -114,7 +110,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [ObservableProperty] public partial string? WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
     [ObservableProperty] public partial bool CanUseReadValue { get; set; }
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(DisplayedValue))]
+    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(HasReadNumber), nameof(CanChooseReadFormat), nameof(DisplayedValue))]
     public partial DlmsValue? LastReadValue { get; private set; }
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReadValueTree), nameof(ShowReadValueTree))]
@@ -124,10 +120,9 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public partial bool UseTextValueView { get; set; }
     public bool HasReadValueTree => ReadValueNodes.Count != 0;
     public bool ShowReadValueTree => HasReadValueTree && !UseTextValueView;
-    public bool HasReadOctets => LastReadValue?.Type == DlmsType.OctetString;
     public bool IsWritingOctets => WriteType == DlmsType.OctetString;
-    public string DisplayedValue => LastReadValue is { Type: DlmsType.OctetString } octets
-        ? DlmsDisplay.OctetPreview(octets, ReadOctetFormat, Value) : Value;
+    protected override DlmsValue? PreviewValue => LastReadValue;
+    protected override string PreviewText => Value;
     public bool CanToggleWriteEditor => IsWriteEditorOpen || IsWriteEnabled;
     public string WriteEditorAction => IsWriteEditorOpen ? "Свернуть" : "Изменить";
     public string WriteHint => WriteType switch

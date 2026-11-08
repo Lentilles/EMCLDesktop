@@ -2,12 +2,16 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using EMCL.Core.Access;
+using EMCL.Core.Codecs;
 using EMCL.Core.Values;
+using EMCL.Protocol.Axdr;
 
 namespace EMCLDesktop.Services;
 
 internal static class DlmsDisplay
 {
+    private static readonly AxdrCodec numericCodec = new();
+
     public static string AttributeAccess(AttributeAccess? access, byte version)
     {
         if (access is null) return "Не указан ассоциацией";
@@ -72,6 +76,17 @@ internal static class DlmsDisplay
     };
 
     internal static string CollectionTitle(DlmsType type, int count) => $"{type} ({count} {ElementWord(count)})";
+
+    internal static bool IsNumeric(DlmsType? type) => type is
+        DlmsType.Int8 or DlmsType.Int16 or DlmsType.Int32 or DlmsType.Int64 or
+        DlmsType.UInt8 or DlmsType.UInt16 or DlmsType.UInt32 or DlmsType.UInt64 or
+        DlmsType.DeltaInt8 or DlmsType.DeltaInt16 or DlmsType.DeltaInt32 or
+        DlmsType.DeltaUInt8 or DlmsType.DeltaUInt16 or DlmsType.DeltaUInt32 or
+        DlmsType.Float32 or DlmsType.Float64 or DlmsType.Bcd or DlmsType.Enum;
+
+    // Skip the A-XDR tag and keep the payload's width, byte order and bit pattern.
+    internal static string NumericHex(DlmsValue value) =>
+        $"0x{Convert.ToHexString(numericCodec.EncodeBytes(value).AsSpan(1))}";
 
     internal static string OctetPreview(DlmsValue octets, OctetStringFormat? format, string hex)
     {

@@ -5,7 +5,7 @@ using EMCLDesktop.Services;
 
 namespace EMCLDesktop.ViewModels;
 
-public sealed partial class DlmsValueNodeViewModel : ObservableObject
+public sealed partial class DlmsValueNodeViewModel : DlmsValuePreviewViewModel
 {
     private const int MaxChildren = 100;
     private readonly DlmsValue? scalar;
@@ -32,16 +32,10 @@ public sealed partial class DlmsValueNodeViewModel : ObservableObject
 
     public string Label { get; }
     public bool IsScalar => scalar is not null;
-    public bool IsOctetString => scalar?.Type == DlmsType.OctetString;
-    public IReadOnlyList<OctetStringFormat> OctetFormats => OctetStringFormat.ReadOptions;
-
     [ObservableProperty] public partial bool IsExpanded { get; set; }
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayedValue))]
-    public partial OctetStringFormat? OctetFormat { get; set; } = OctetStringFormat.Hex;
 
-    public string DisplayedValue => scalar is { Type: DlmsType.OctetString }
-        ? DlmsDisplay.OctetPreview(scalar, OctetFormat, scalarText) : scalarText;
+    protected override DlmsValue? PreviewValue => scalar;
+    protected override string PreviewText => scalarText;
 
     public IReadOnlyList<DlmsValueNodeViewModel> Children => children ??= CreateChildren();
 

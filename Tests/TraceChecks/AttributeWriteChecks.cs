@@ -153,18 +153,18 @@ internal static class AttributeWriteChecks
         var fields = compound.ReadValueNodes.Single().Children.Single().Children;
         var windowsLeaf = fields[0];
         var utf8Leaf = fields[1].Children.Single();
-        Check(compound.HasReadValueTree && windowsLeaf.IsOctetString && utf8Leaf.IsOctetString &&
+        Check(compound.HasReadValueTree && windowsLeaf.HasReadOctets && utf8Leaf.HasReadOctets &&
             fields[2].DisplayedValue == "null" && windowsLeaf.DisplayedValue == "DF" && utf8Leaf.DisplayedValue == "D0AF",
             "Nested values did not expose typed leaves with default HEX previews");
-        windowsLeaf.OctetFormat = windows1251;
+        windowsLeaf.ReadOctetFormat = windows1251;
         Check(windowsLeaf.DisplayedValue == "Я" && utf8Leaf.DisplayedValue == "D0AF", "Leaf formats were not independent");
-        utf8Leaf.OctetFormat = utf8;
-        windowsLeaf.OctetFormat = ascii;
+        utf8Leaf.ReadOctetFormat = utf8;
+        windowsLeaf.ReadOctetFormat = ascii;
         Check(utf8Leaf.DisplayedValue == "Я" && windowsLeaf.DisplayedValue.EndsWith("DF"),
             "Nested text preview lost encoding or HEX fallback");
-        fields[3].OctetFormat = dateFormat;
-        utf8Leaf.OctetFormat = dateFormat;
-        Check(fields[3].OctetFormats.Contains(dateFormat) && fields[3].DisplayedValue == datePreview &&
+        fields[3].ReadOctetFormat = dateFormat;
+        utf8Leaf.ReadOctetFormat = dateFormat;
+        Check(fields[3].ReadOctetFormats.Contains(dateFormat) && fields[3].DisplayedValue == datePreview &&
             utf8Leaf.DisplayedValue.EndsWith("D0AF"), "Nested DLMS date-time preview or HEX fallback is missing");
         Check(compound.ShowReadValueTree, "Collection did not default to tree view");
         compound.UseTextValueView = true;
@@ -181,6 +181,37 @@ internal static class AttributeWriteChecks
             "A large array did not expose every original index");
         compound.ForgetReadValue();
         Check(!compound.HasReadValueTree && !compound.ShowReadValueTree, "A forgotten value left a stale tree");
+
+        foreach (var (numericType, dec, hex) in new (DlmsType, string, string)[]
+        {
+            (DlmsType.Int8, "-128", "80"), (DlmsType.Int16, "-2", "FFFE"),
+            (DlmsType.Int32, "-2", "FFFFFFFE"), (DlmsType.Int64, "-9223372036854775808", "8000000000000000"),
+            (DlmsType.UInt8, "2", "02"), (DlmsType.UInt16, "2", "0002"),
+            (DlmsType.UInt32, "2", "00000002"), (DlmsType.UInt64, "18446744073709551615", "FFFFFFFFFFFFFFFF"),
+            (DlmsType.DeltaInt8, "-2", "FE"), (DlmsType.DeltaInt16, "-2", "FFFE"),
+            (DlmsType.DeltaInt32, "-2", "FFFFFFFE"), (DlmsType.DeltaUInt8, "7", "07"),
+            (DlmsType.DeltaUInt16, "7", "0007"), (DlmsType.DeltaUInt32, "7", "00000007"),
+            (DlmsType.Float32, "1.25", "3FA00000"), (DlmsType.Float64, "-1.25", "BFF4000000000000"),
+            (DlmsType.Bcd, "18", "12"), (DlmsType.Enum, "255", "FF")
+        })
+        {
+            var value = DlmsValueEditor.Parse(numericType, dec);
+            var numericAttribute = new AttributeViewModel(2, "number", null, "", true) { Value = dec };
+            numericAttribute.RememberReadValue(value);
+            compound.RememberReadValue(DlmsValue.Structure(value, value));
+            var numbers = compound.ReadValueNodes.Single().Children;
+            Check(numericAttribute.CanChooseReadFormat && numericAttribute.HasReadNumber &&
+                numericAttribute.DisplayedValue == dec && numbers[0].HasReadNumber && numbers[0].DisplayedValue == dec,
+                $"{numericType} did not default to DEC");
+            numericAttribute.UseNumericHex = true;
+            numbers[0].UseNumericHex = true;
+            Check(numericAttribute.DisplayedValue == $"0x{hex}" && numbers[0].DisplayedValue == $"0x{hex}" &&
+                numbers[1].DisplayedValue == dec, $"{numericType} HEX lost its wire payload or affected a sibling");
+            numericAttribute.UseReadValue();
+            numericAttribute.UseNumericHex = false;
+            Check(numericAttribute.WriteText == dec && numericAttribute.DisplayedValue == dec,
+                $"{numericType} display changed the value copied to the editor or did not restore DEC");
+        }
 
         for (byte mode = 0; mode <= 6; mode++)
         {

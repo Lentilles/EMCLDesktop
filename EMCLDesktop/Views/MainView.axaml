@@ -5,6 +5,22 @@
              xmlns:views="using:EMCLDesktop.Views"
              x:Class="EMCLDesktop.Views.MainView"
              x:DataType="vm:MainViewModel">
+    <UserControl.Resources>
+        <DataTemplate x:Key="ReadValueFormatTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
+            <StackPanel Orientation="Horizontal">
+                <ComboBox IsVisible="{Binding HasReadOctets}"
+                          ItemsSource="{Binding ReadOctetFormats}"
+                          SelectedItem="{Binding ReadOctetFormat, Mode=TwoWay}"
+                          AutomationProperties.Name="Формат считанного OctetString"
+                          ToolTip.Tip="Формат считанного OctetString" />
+                <ToggleSwitch IsVisible="{Binding HasReadNumber}"
+                              IsChecked="{Binding UseNumericHex, Mode=TwoWay}"
+                              OffContent="DEC" OnContent="HEX"
+                              AutomationProperties.Name="Шестнадцатеричный вид числа"
+                              ToolTip.Tip="DEC или HEX. В HEX показываются байты числа в A-XDR." />
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
     <UserControl.Styles>
         <StyleInclude Source="/Styles/CommonStyles.axaml" />
         <Style Selector="Button.connection-action">
@@ -261,11 +277,8 @@
                                                                                                     ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
                                                                                         </StackPanel>
                                                                                     </Grid>
-                                                                                    <ComboBox IsVisible="{Binding HasReadOctets}"
-                                                                                              ItemsSource="{Binding ReadOctetFormats}"
-                                                                                              SelectedItem="{Binding ReadOctetFormat, Mode=TwoWay}"
-                                                                                              AutomationProperties.Name="Формат считанного OctetString"
-                                                                                              ToolTip.Tip="Формат считанного OctetString" />
+                                                                                    <ContentControl IsVisible="{Binding CanChooseReadFormat}" Content="{Binding .}"
+                                                                                                    ContentTemplate="{StaticResource ReadValueFormatTemplate}" />
                                                                                     <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
                                                                                              IsVisible="{Binding !ShowReadValueTree}"
                                                                                              IsReadOnly="True" AcceptsReturn="True"
@@ -286,11 +299,8 @@
                                                                                                     <WrapPanel Orientation="Horizontal">
                                                                                                         <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
                                                                                                                    Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                                                                        <ComboBox IsVisible="{Binding IsOctetString}"
-                                                                                                                  ItemsSource="{Binding OctetFormats}"
-                                                                                                                  SelectedItem="{Binding OctetFormat, Mode=TwoWay}"
-                                                                                                                  AutomationProperties.Name="Формат вложенного OctetString"
-                                                                                                                  ToolTip.Tip="Формат вложенного OctetString" />
+                                                                                                        <ContentControl IsVisible="{Binding CanChooseReadFormat}" Content="{Binding .}"
+                                                                                                                        ContentTemplate="{StaticResource ReadValueFormatTemplate}" />
                                                                                                     </WrapPanel>
                                                                                                     <SelectableTextBlock IsVisible="{Binding IsScalar}" Text="{Binding DisplayedValue}"
                                                                                                                          TextWrapping="Wrap" />
