@@ -121,7 +121,7 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
             case LnResponse response:
                 if (response.Kind == CosemOperationKind.Read)
                     Take("Result choice", response.Result.Value is null ? "data-access-result" : "data", 1);
-                if (response.Kind != CosemOperationKind.Read || response.Result.Error != CosemError.Success)
+                if (response.Kind != CosemOperationKind.Read || response.Result.Error != CosemResultCode.Success)
                     Take("Результат операции", response.Result.Error.ToString(), 1);
                 if (response.Kind == CosemOperationKind.Invoke)
                 {

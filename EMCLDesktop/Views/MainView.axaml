@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="using:Avalonia.Data.Converters"
              xmlns:vm="using:EMCLDesktop.ViewModels"
              xmlns:views="using:EMCLDesktop.Views"
              x:Class="EMCLDesktop.Views.MainView"
@@ -240,22 +241,74 @@
                                                                                     </StackPanel>
                                                                                 </Grid>
                                                                                 <StackPanel Spacing="4">
-                                                                                    <TextBlock Text="ЗНАЧЕНИЕ" Classes="field-label" />
-                                                                                    <TextBox Text="{Binding Value, Mode=OneWay}"
+                                                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                                                        <TextBlock Text="ЗНАЧЕНИЕ" Classes="field-label"
+                                                                                                   VerticalAlignment="Center" />
+                                                                                        <Button Grid.Column="1" Content="{Binding WriteEditorAction}"
+                                                                                                Classes="secondary" IsEnabled="{Binding CanToggleWriteEditor}"
+                                                                                                ToolTip.Tip="{Binding WriteUnavailableReason}"
+                                                                                                ToolTip.ServiceEnabled="{Binding !IsWriteEditorOpen}"
+                                                                                                ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
+                                                                                    </Grid>
+                                                                                    <ComboBox IsVisible="{Binding HasReadOctets}"
+                                                                                              ItemsSource="{Binding OctetFormats}"
+                                                                                              SelectedItem="{Binding ReadOctetFormat, Mode=TwoWay}"
+                                                                                              AutomationProperties.Name="Формат считанного OctetString"
+                                                                                              ToolTip.Tip="Формат считанного OctetString" />
+                                                                                    <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
                                                                                              IsReadOnly="True" AcceptsReturn="True"
                                                                                              TextWrapping="Wrap" MinHeight="42"
                                                                                              MaxHeight="180"
                                                                                              ScrollViewer.VerticalScrollBarVisibility="Auto" />
                                                                                 </StackPanel>
-                                                                                <Expander Header="Запись значения" HorizontalAlignment="Stretch"
-                                                                                          HorizontalContentAlignment="Stretch">
+                                                                                <Border IsVisible="{Binding IsWriteEditorOpen}"
+                                                                                        BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+                                                                                    <Border.Resources>
+                                                                                        <SolidColorBrush x:Key="TextControlBackground" Color="#0D1726" />
+                                                                                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#172438" />
+                                                                                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#122136" />
+                                                                                        <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#172438" />
+                                                                                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="#31435B" />
+                                                                                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#536F8B" />
+                                                                                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#69C4E1" />
+                                                                                        <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#293A52" />
+                                                                                        <SolidColorBrush x:Key="TextControlForeground" Color="#E7EFF8" />
+                                                                                        <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#E7EFF8" />
+                                                                                        <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#E7EFF8" />
+                                                                                        <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#8296AE" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxBackground" Color="#22344C" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="#22344C" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#273B53" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#214A61" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#172438" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#172438" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#31435B" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#273B53" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#214A61" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#214A61" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#273B53" />
+                                                                                        <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#1D526C" />
+                                                                                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#2A7898" />
+                                                                                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1D526C" />
+                                                                                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#172438" />
+                                                                                        <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#8296AE" />
+                                                                                    </Border.Resources>
                                                                                     <StackPanel Spacing="8" IsEnabled="{Binding IsReadEnabled}">
                                                                                         <TextBlock Text="Тип для записи" Classes="field-label" />
                                                                                         <ComboBox ItemsSource="{Binding WriteTypes}"
                                                                                                   SelectedItem="{Binding WriteType, Mode=TwoWay}"
                                                                                                   PlaceholderText="Выберите тип" MinWidth="180" />
+                                                                                        <StackPanel IsVisible="{Binding IsWritingOctets}" Spacing="4">
+                                                                                            <TextBlock Text="Формат ввода OctetString" Classes="field-label" />
+                                                                                            <ComboBox ItemsSource="{Binding OctetFormats}"
+                                                                                                      SelectedItem="{Binding WriteOctetFormat, Mode=OneWay}"
+                                                                                                      AutomationProperties.Name="Формат ввода OctetString"
+                                                                                                      SelectionChanged="WriteOctetFormatChanged" />
+                                                                                        </StackPanel>
                                                                                         <TextBlock Text="{Binding WriteHint}" Classes="muted" FontSize="12" />
+                                                                                        <TextBlock Text="Новое значение" Classes="field-label" />
                                                                                         <TextBox Text="{Binding WriteText, Mode=TwoWay}"
+                                                                                                 AutomationProperties.Name="Новое значение"
                                                                                                  AcceptsReturn="True" TextWrapping="Wrap"
                                                                                                  MinHeight="70" MaxHeight="240"
                                                                                                  ScrollViewer.VerticalScrollBarVisibility="Auto" />
@@ -270,7 +323,7 @@
                                                                                         <TextBlock Text="{Binding WriteUnavailableReason}" Classes="muted" FontSize="12" />
                                                                                         <TextBlock Text="{Binding WriteStatus}" TextWrapping="Wrap" Foreground="#69C4E1" />
                                                                                     </StackPanel>
-                                                                                </Expander>
+                                                                                </Border>
                                                                             </StackPanel>
                                                                         </Border>
                                                                     </DataTemplate>
@@ -442,6 +495,34 @@
                                                                                            FontWeight="SemiBold" TextWrapping="Wrap" />
                                                                                 <TextBlock Text="{Binding ParameterType}" Classes="muted" />
                                                                                 <TextBlock Text="{Binding Access}" TextWrapping="Wrap" />
+                                                                                <TextBlock Text="{Binding InvokeUnavailableReason}" Classes="muted" FontSize="12"
+                                                                                           IsVisible="{Binding InvokeUnavailableReason, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
+                                                                                <Expander Header="Вызов метода" IsEnabled="{Binding IsInvokeEnabled}"
+                                                                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                                                                    <StackPanel Spacing="8">
+                                                                                        <CheckBox Content="Передать параметр"
+                                                                                                  IsChecked="{Binding IncludeParameter, Mode=TwoWay}" />
+                                                                                        <StackPanel Spacing="6" IsVisible="{Binding IncludeParameter}">
+                                                                                            <TextBlock Text="Тип параметра" Classes="field-label" />
+                                                                                            <ComboBox ItemsSource="{Binding ParameterTypes}"
+                                                                                                      SelectedItem="{Binding ArgumentType, Mode=TwoWay}"
+                                                                                                      AutomationProperties.Name="Тип параметра"
+                                                                                                      PlaceholderText="Выберите тип" />
+                                                                                            <TextBlock Text="{Binding ParameterHint}" Classes="muted" FontSize="12" />
+                                                                                            <TextBox Text="{Binding ParameterText, Mode=TwoWay}"
+                                                                                                     AutomationProperties.Name="Значение параметра"
+                                                                                                     AcceptsReturn="True" TextWrapping="Wrap"
+                                                                                                     MinHeight="44" MaxHeight="200"
+                                                                                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                        </StackPanel>
+                                                                                        <Button Content="Вызвать метод" Classes="primary" Click="InvokeMethodClick" />
+                                                                                    </StackPanel>
+                                                                                </Expander>
+                                                                                <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto"
+                                                                                              IsVisible="{Binding InvokeStatus, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}"
+                                                                                              HorizontalScrollBarVisibility="Disabled">
+                                                                                    <SelectableTextBlock Text="{Binding InvokeStatus}" TextWrapping="Wrap" Foreground="#69C4E1" />
+                                                                                </ScrollViewer>
                                                                             </StackPanel>
                                                                         </Border>
                                                                     </DataTemplate>
@@ -467,6 +548,13 @@
                                 <TextBlock Text="{Binding TreeReadProgressText}" Foreground="#69C4E1" FontSize="12" />
                                 <ProgressBar Minimum="0" Maximum="{Binding TreeReadProgressMaximum}" Value="{Binding TreeReadCurrent}"
                                              IsIndeterminate="{Binding IsTreeReadIndeterminate}" Height="6" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="5" Margin="0,8,0,0"
+                                        IsVisible="{Binding IsProfileReadInProgress}">
+                                <TextBlock Text="{Binding ProfileReadProgressText}" Foreground="#69C4E1" FontSize="12" />
+                                <ProgressBar Minimum="0" Maximum="{Binding ProfileReadProgressMaximum}"
+                                             Value="{Binding ProfileReadProgressCurrent}"
+                                             IsIndeterminate="{Binding IsProfileReadIndeterminate}" Height="6" />
                             </StackPanel>
                         </Grid>
                     </Border>

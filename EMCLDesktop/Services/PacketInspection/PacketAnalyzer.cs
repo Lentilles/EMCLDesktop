@@ -367,8 +367,8 @@ public sealed class PacketAnalyzer
                 packet = MatchResponse(packet, responseKey, sender, true);
                 packet = packet with { DataValue = response.Result.Value,
                     ValueText = response.Result.Value is { } value ? DlmsDisplay.Value(value) : response.Result.Error.ToString(),
-                    HasError = packet.HasError || response.Result.Error != CosemError.Success || response.ReturnDataError.HasValue };
-                if (response.Result.Error != CosemError.Success)
+                    HasError = packet.HasError || response.Result.Error != CosemResultCode.Success || response.ReturnDataError.HasValue };
+                if (response.Result.Error != CosemResultCode.Success)
                     packet = packet with { Diagnostic = Join(packet.Diagnostic, $"Ошибка прибора: {response.Result.Error}") };
                 if (response.ReturnDataError is { } returnedError)
                     packet = packet with { Diagnostic = Join(packet.Diagnostic, $"Ошибка return data: {returnedError}") };

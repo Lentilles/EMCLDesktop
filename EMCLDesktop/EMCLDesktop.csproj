@@ -19,6 +19,6 @@
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
         <PackageReference Include="CommunityToolkit.Mvvm"/>
-        <ProjectReference Include="../../EMCL/src/EMCL/EMCL.csproj" />
+        <PackageReference Include="EMCL" />
     </ItemGroup>
 </Project>

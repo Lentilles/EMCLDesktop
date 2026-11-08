@@ -77,6 +77,8 @@ public sealed record ProfileCaptureColumnViewModel(CaptureObject Capture, string
 public sealed partial class AttributeViewModel(sbyte index, string? name, string? type,
     string access, bool canRead) : ObservableObject
 {
+    private bool hasOpenedWriteEditor;
+
     public sbyte Index { get; } = index;
     public string Name { get; } = name ?? "Неизвестный атрибут";
     public bool HasDeclaredType { get; } = type is not null;
@@ -84,25 +86,76 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public string Access { get; } = access;
     public bool CanRead { get; } = canRead;
     [ObservableProperty] public partial bool IsReadEnabled { get; set; } = true;
-    [ObservableProperty] public partial string Value { get; set; } = "Не считано";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedValue))]
+    public partial string Value { get; set; } = "Не считано";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedValue))]
+    public partial OctetStringFormat? ReadOctetFormat { get; set; } = OctetStringFormat.Hex;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WriteHint))]
+    public partial OctetStringFormat WriteOctetFormat { get; private set; } = OctetStringFormat.Hex;
+    public IReadOnlyList<OctetStringFormat> OctetFormats => OctetStringFormat.Options;
     public IReadOnlyList<DlmsType> WriteTypes => DlmsValueEditor.Types;
-    [ObservableProperty] public partial DlmsType? WriteType { get; set; } =
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WriteHint), nameof(IsWritingOctets))]
+    public partial DlmsType? WriteType { get; set; } =
         Enum.TryParse<DlmsType>(type, out var declaredType) ? declaredType : null;
     [ObservableProperty] public partial string WriteText { get; set; } = "";
     [ObservableProperty] public partial string WriteStatus { get; set; } = "";
-    [ObservableProperty] public partial bool IsWriteEnabled { get; set; }
-    [ObservableProperty] public partial string WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggleWriteEditor))]
+    public partial bool IsWriteEnabled { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggleWriteEditor), nameof(WriteEditorAction))]
+    public partial bool IsWriteEditorOpen { get; set; }
+    [ObservableProperty] public partial string? WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
     [ObservableProperty] public partial bool CanUseReadValue { get; set; }
-    public DlmsValue? LastReadValue { get; private set; }
-    public string WriteHint => WriteType is { } selected
-        ? DlmsValueEditor.Hint(selected) : "Выберите тип. Для неизвестного типа сначала считайте значение или укажите тип вручную.";
-
-    partial void OnWriteTypeChanged(DlmsType? value)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(DisplayedValue))]
+    public partial DlmsValue? LastReadValue { get; private set; }
+    public bool HasReadOctets => LastReadValue?.Type == DlmsType.OctetString;
+    public bool IsWritingOctets => WriteType == DlmsType.OctetString;
+    public string DisplayedValue
     {
-        OnPropertyChanged(nameof(WriteHint));
-        WriteStatus = "";
+        get
+        {
+            if (ReadOctetFormat is not { } format || format == OctetStringFormat.Hex ||
+                LastReadValue is not { Type: DlmsType.OctetString } octets)
+                return Value;
+            if (format.Format(octets.Bytes.AsSpan()) is not { } text)
+                return $"{format}: значение не представимо как текст. HEX\n{Value}";
+
+            const int previewLength = 256;
+            if (text.Length <= previewLength) return text;
+            int end = char.IsHighSurrogate(text[previewLength - 1]) ? previewLength - 1 : previewLength;
+            return $"{text[..end]}… ({octets.Bytes.Length} байт)";
+        }
     }
+    public bool CanToggleWriteEditor => IsWriteEditorOpen || IsWriteEnabled;
+    public string WriteEditorAction => IsWriteEditorOpen ? "Свернуть" : "Изменить";
+    public string WriteHint => WriteType switch
+    {
+        DlmsType.OctetString when WriteOctetFormat != OctetStringFormat.Hex =>
+            $"Текст в кодировке {WriteOctetFormat}. Пробелы сохраняются.",
+        { } selected => DlmsValueEditor.Hint(selected),
+        _ => "Выберите тип. Для неизвестного типа сначала считайте значение или укажите тип вручную."
+    };
+
+    partial void OnWriteTypeChanged(DlmsType? value) => WriteStatus = "";
     partial void OnWriteTextChanged(string value) => WriteStatus = "";
+
+    public void ToggleWriteEditor()
+    {
+        if (!CanToggleWriteEditor) return;
+        if (!hasOpenedWriteEditor)
+        {
+            WriteOctetFormat = ReadOctetFormat ?? OctetStringFormat.Hex;
+            UseReadValue();
+            hasOpenedWriteEditor = true;
+        }
+        IsWriteEditorOpen = !IsWriteEditorOpen;
+    }
 
     public void RememberReadValue(DlmsValue value)
     {
@@ -122,13 +175,39 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
         if (LastReadValue is not { } value) return;
         try
         {
-            string text = DlmsValueEditor.Format(value);
+            string? text = value.Type == DlmsType.OctetString
+                ? WriteOctetFormat.Format(value.Bytes.AsSpan()) : DlmsValueEditor.Format(value);
+            if (text is null)
+            {
+                WriteOctetFormat = OctetStringFormat.Hex;
+                text = DlmsValueEditor.Format(value);
+            }
             WriteType = value.Type;
             WriteText = text;
         }
         catch (Exception error)
         {
             WriteStatus = $"Не удалось подготовить значение: {error.Message}";
+        }
+    }
+
+    public bool TryChangeWriteOctetFormat(OctetStringFormat format)
+    {
+        if (format == WriteOctetFormat) return true;
+        try
+        {
+            var bytes = WriteOctetFormat.Parse(WriteText);
+            string text = format.Format(bytes)
+                ?? throw new FormatException($"Байты черновика не представимы в {format}.");
+            WriteOctetFormat = format;
+            WriteText = text;
+            WriteStatus = "";
+            return true;
+        }
+        catch (FormatException error)
+        {
+            WriteStatus = $"Формат черновика сохранён. {error.Message}";
+            return false;
         }
     }
 }
@@ -141,10 +220,34 @@ public sealed class ObjectGroupViewModel(string className, ushort classId, byte 
     public IReadOnlyList<MeterObjectViewModel> Objects { get; } = objects;
 }
 
-public sealed class MethodViewModel(sbyte index, string? name, string? parameterType, string access)
+public sealed partial class MethodViewModel : ObservableObject
 {
-    public sbyte Index { get; } = index;
-    public string Name { get; } = name ?? "Неизвестный метод";
-    public string ParameterType { get; } = parameterType ?? "Тип параметра не указан";
-    public string Access { get; } = access;
+    public MethodViewModel(sbyte index, string? name, string? parameterType, string access)
+    {
+        Index = index;
+        Name = name ?? "Неизвестный метод";
+        ParameterType = parameterType ?? "Тип параметра не указан";
+        Access = access;
+        if (Enum.TryParse<DlmsType>(parameterType, out var type) && Enum.IsDefined(type))
+        {
+            ArgumentType = type;
+            IncludeParameter = true;
+        }
+    }
+
+    public sbyte Index { get; }
+    public string Name { get; }
+    public string ParameterType { get; }
+    public string Access { get; }
+    public IReadOnlyList<DlmsType> ParameterTypes => DlmsValueEditor.Types;
+    [ObservableProperty] public partial bool IncludeParameter { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ParameterHint))]
+    public partial DlmsType? ArgumentType { get; set; }
+    [ObservableProperty] public partial string ParameterText { get; set; } = "";
+    [ObservableProperty] public partial bool IsInvokeEnabled { get; set; }
+    [ObservableProperty] public partial string? InvokeUnavailableReason { get; set; }
+    [ObservableProperty] public partial string InvokeStatus { get; set; } = "";
+
+    public string ParameterHint => ArgumentType is { } type ? DlmsValueEditor.Hint(type) : "Выберите тип параметра.";
 }

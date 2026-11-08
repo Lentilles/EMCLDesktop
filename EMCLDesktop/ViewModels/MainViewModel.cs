@@ -37,6 +37,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private readonly CancellationTokenSource shutdown = new();
     private TaskCompletionSource? connecting;
     private int treeReadVersion;
+    private int profileReadVersion;
     private int disposed;
 
     public IReadOnlyList<string> Transports { get; } = ["TCP", "Serial"];
@@ -125,6 +126,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial int TreeReadCurrent { get; set; }
     [ObservableProperty] public partial int TreeReadTotal { get; set; }
     [ObservableProperty] public partial string TreeReadProgressText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsProfileReadInProgress), nameof(IsProfileReadIndeterminate),
+        nameof(ProfileReadProgressMaximum), nameof(ProfileReadProgressCurrent), nameof(ProfileReadProgressText))]
+    private partial ProfileBufferProgress? ProfileReadProgress { get; set; }
     [ObservableProperty] public partial int SelectedTabIndex { get; set; }
     [ObservableProperty] public partial string SearchText { get; set; } = "";
     [ObservableProperty] public partial bool UseRegularExpression { get; set; }
@@ -146,6 +151,23 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public bool CanEditConfiguration => !IsReading && !IsBusy;
     public int TreeReadProgressMaximum => Math.Max(1, TreeReadTotal);
     public bool IsTreeReadIndeterminate => TreeReadTotal == 0;
+    private int? ProfileReadTotal => ProfileReadProgress?.TotalRows ?? ProfileReadProgress?.TotalBytes;
+    public bool IsProfileReadInProgress => ProfileReadProgress.HasValue;
+    public bool IsProfileReadIndeterminate => !ProfileReadTotal.HasValue;
+    public int ProfileReadProgressMaximum => Math.Max(1, ProfileReadTotal.GetValueOrDefault());
+    public int ProfileReadProgressCurrent => ProfileReadProgress switch
+    {
+        { TotalRows: not null } progress => progress.RowsRead,
+        { TotalBytes: not null } progress => progress.BytesRead,
+        _ => 0
+    };
+    public string ProfileReadProgressText => ProfileReadProgress switch
+    {
+        { TotalRows: { } total } progress => $"Чтение профиля · строк: {progress.RowsRead} из {total}",
+        { TotalBytes: { } total } progress =>
+            $"Чтение профиля · байт: {progress.BytesRead} из {total} · строк: {progress.RowsRead}",
+        _ => "Ожидание заголовка буфера профиля…"
+    };
     public bool IsObjectsTab => SelectedTabIndex == ObjectsTabIndex;
 
     public PacketInspectorViewModel Inspector { get; }
@@ -247,7 +269,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         NotifyConnectionDisplayChanged();
         ReadSelectedObjectCommand.NotifyCanExecuteChanged();
         ReadTreeCommand.NotifyCanExecuteChanged();
-        UpdateAttributeReadAvailability();
+        UpdateObjectOperationAvailability();
     }
     partial void OnIsBusyChanged(bool value)
     {
@@ -256,7 +278,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ToggleConnectionCommand.NotifyCanExecuteChanged();
         ReadSelectedObjectCommand.NotifyCanExecuteChanged();
         ReadTreeCommand.NotifyCanExecuteChanged();
-        UpdateAttributeReadAvailability();
+        UpdateObjectOperationAvailability();
     }
     partial void OnIsReadingChanged(bool value)
     {
@@ -265,7 +287,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ToggleConnectionCommand.NotifyCanExecuteChanged();
         ReadSelectedObjectCommand.NotifyCanExecuteChanged();
         ReadTreeCommand.NotifyCanExecuteChanged();
-        UpdateAttributeReadAvailability();
+        UpdateObjectOperationAvailability();
     }
     partial void OnTreeReadTotalChanged(int value)
     {
@@ -565,25 +587,35 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         previousSelectedObject = value;
         ++selectionVersion;
         ReadSelectedObjectCommand.NotifyCanExecuteChanged();
-        UpdateAttributeReadAvailability();
+        UpdateObjectOperationAvailability();
         if (!IsReading && IsConnected && value != null)
             Status = $"Выбран {value.Obis}. Нажмите «Считать все атрибуты» или «Считать» у нужного атрибута.";
     }
 
-    private void UpdateAttributeReadAvailability()
+    private void UpdateObjectOperationAvailability()
     {
-        if (SelectedObject is null) return;
-        bool canRead = !IsBusy && !IsReading;
-        foreach (var attribute in SelectedObject.Attributes)
+        if (SelectedObject is not { } obj) return;
+        bool isIdle = !IsBusy && !IsReading;
+        foreach (var attribute in obj.Attributes)
         {
-            attribute.IsReadEnabled = canRead;
-            attribute.WriteUnavailableReason = connection?.WriteUnavailableReason(
-                SelectedObject.ClassId, SelectedObject.LogicalName, attribute.Index)
+            attribute.IsReadEnabled = isIdle;
+            string reason = connection?.WriteUnavailableReason(obj.ClassId, obj.LogicalName, attribute.Index)
                 ?? "Подключитесь к счётчику для записи.";
-            attribute.IsWriteEnabled = canRead && IsConnected && attribute.WriteUnavailableReason.Length == 0;
+            attribute.WriteUnavailableReason = reason.Length == 0 ? null : reason;
+            attribute.IsWriteEnabled = isIdle && IsConnected && reason.Length == 0;
         }
-        SelectedObject.IsProfileReadEnabled = canRead;
+        foreach (var method in obj.Methods)
+        {
+            string reason = MethodInvokeUnavailableReason(obj, method, IsConnected ? connection : null);
+            method.InvokeUnavailableReason = reason.Length == 0 ? null : reason;
+            method.IsInvokeEnabled = isIdle && reason.Length == 0;
+        }
+        obj.IsProfileReadEnabled = isIdle;
     }
+
+    private static string MethodInvokeUnavailableReason(MeterObjectViewModel obj, MethodViewModel method,
+        MeterConnection? meter) => meter?.InvokeUnavailableReason(obj.ClassId, obj.LogicalName, method.Index)
+        ?? "Подключитесь к счётчику для вызова метода.";
 
     private void ApplyObjectFilter()
     {
@@ -995,7 +1027,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             if (attribute.WriteType is not { } type)
                 throw new FormatException("Выберите тип записываемого значения.");
-            value = DlmsValueEditor.Parse(type, attribute.WriteText, limits);
+            value = DlmsValueEditor.Parse(type, attribute.WriteText, limits, attribute.WriteOctetFormat);
         }
         catch (FormatException error)
         {
@@ -1038,7 +1070,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         catch (Exception error)
         {
             if (version != selectionVersion || meter != connection) return;
-            if (error is not (DlmsOperationException or ArgumentException or InvalidOperationException or NotSupportedException))
+            if (error is not (DlmsOperationException or ArgumentException or InvalidOperationException or NotSupportedException or OperationCanceledException))
             {
                 attribute.ForgetReadValue();
                 attribute.Value = "Исход записи неизвестен. Перечитайте значение со счётчика.";
@@ -1047,6 +1079,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             attribute.WriteStatus = error switch
             {
                 DlmsOperationException remote => $"Счётчик отклонил запись: {remote.Error} (код {(int)remote.Error}). {remote.Message}",
+                DlmsWriteUnconfirmedException unconfirmed =>
+                    $"Запись не подтверждена: {unconfirmed.InnerException?.Message ?? unconfirmed.Message}. Проверьте значение чтением перед повторной записью.",
+                OperationCanceledException => "Запись отменена до отправки запроса.",
                 ArgumentException or InvalidOperationException or NotSupportedException => $"Запись не выполнена: {error.Message}",
                 _ => $"Запись не подтверждена: {error.Message}. Проверьте значение чтением перед повторной записью."
             };
@@ -1069,6 +1104,97 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         obj.ProfileCaptureObjects = null;
         obj.ProfileCaptureColumns.Clear();
         obj.SelectedProfileCaptureColumn = null;
+    }
+
+    public async Task InvokeMethodAsync(MethodViewModel method)
+    {
+        var obj = SelectedObject;
+        if (obj is null || !obj.Methods.Contains(method) || IsBusy || IsReading) return;
+        var meter = IsConnected ? connection : null;
+        string target = $"{obj.Obis}, метод {method.Index}";
+        string reason = MethodInvokeUnavailableReason(obj, method, meter);
+        if (meter is null || reason.Length != 0)
+        {
+            method.InvokeStatus = reason;
+            ReportError($"{target}. {reason}");
+            return;
+        }
+
+        DlmsValue? parameter = null;
+        if (method.IncludeParameter)
+        {
+            try
+            {
+                if (method.ArgumentType is not { } type)
+                    throw new FormatException("Выберите тип параметра.");
+                parameter = DlmsValueEditor.Parse(type, method.ParameterText, limits);
+            }
+            catch (FormatException error)
+            {
+                method.InvokeStatus = error.Message;
+                ReportError($"{target}. {error.Message}");
+                return;
+            }
+        }
+
+        IsBusy = true;
+        method.InvokeStatus = "Вызов…";
+        Status = $"Вызов {target}…";
+        try
+        {
+            var result = await meter.InvokeAsync(obj.ClassId, obj.LogicalName, method.Index, parameter, shutdown.Token);
+            InvalidateAfterInvoke(obj);
+            method.InvokeStatus = result is null ? "Вызов подтверждён. Счётчик не вернул значение."
+                : $"Вызов подтверждён. Возвращённое значение ({result.Type}):\n{DlmsDisplay.Value(result)}";
+            Status = $"{target}. Вызов подтверждён счётчиком.";
+        }
+        catch (DlmsOperationException error)
+        {
+            string code = $"{error.Error} (код {(int)error.Error})";
+            if (error.Response.Result.Error == CosemResultCode.Success)
+            {
+                InvalidateAfterInvoke(obj);
+                method.InvokeStatus = $"Вызов подтверждён. Счётчик вернул ошибку доступа к результату: {code}.";
+            }
+            else
+                method.InvokeStatus = $"Счётчик отклонил вызов: {code}.";
+            ReportError($"{target}. {method.InvokeStatus}");
+        }
+        catch (Exception error)
+        {
+            // EMCL 0.1.1 faults the association if an attempted ACTION exchange fails.
+            if (meter.IsActive && error is (ArgumentException or InvalidOperationException or
+                NotSupportedException or OperationCanceledException))
+                method.InvokeStatus = $"Вызов не выполнен: {error.Message}";
+            else
+            {
+                InvalidateAfterInvoke(obj);
+                method.InvokeStatus = $"Исход вызова не подтверждён: {error.Message}. Проверьте состояние счётчика перед повторным вызовом.";
+            }
+            ReportError($"{target}. {method.InvokeStatus}");
+        }
+        finally
+        {
+            if (meter == connection && !meter.IsActive) IsConnected = false;
+            IsBusy = false;
+        }
+    }
+
+    private static void InvalidateAfterInvoke(MeterObjectViewModel obj)
+    {
+        foreach (var attribute in obj.Attributes)
+        {
+            if (attribute.Index == CosemObject.LogicalNameAttributeIndex) continue;
+            attribute.ForgetReadValue();
+            attribute.Value = "Перечитайте значение после вызова метода.";
+        }
+        if (!obj.IsProfileGeneric) return;
+        obj.ProfileBuffer = null;
+        obj.ProfileCaptureObjects = null;
+        obj.ProfileCaptureColumns.Clear();
+        obj.SelectedProfileCaptureColumn = null;
+        obj.ProfileTable = null;
+        obj.ProfileTableStatus = "После вызова метода перечитайте buffer и capture_objects.";
     }
 
     public async Task ReadProfileAsync(MeterObjectViewModel obj)
@@ -1112,7 +1238,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     uint requested = ParsePositiveEntry(obj.ProfileCountText, "Количество записей");
                     Status = $"{obj.Obis}: чтение entries_in_use…";
                     var entries = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
-                        ProfileGenericMembers.Attributes.EntriesInUse);
+                        ProfileGenericMembers.Attributes.EntriesInUse, cancellationToken: shutdown.Token);
                     if (version != selectionVersion || meter != connection) return;
                     var entriesAttribute = obj.Attributes.FirstOrDefault(attribute =>
                         attribute.Index == ProfileGenericMembers.Attributes.EntriesInUse);
@@ -1145,10 +1271,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             }
 
             Status = $"{obj.Obis}: чтение buffer…";
-            var buffer = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
-                ProfileGenericMembers.Attributes.Buffer, selection);
-            if (version != selectionVersion || meter != connection) return;
-            if (bufferAttribute != null) ApplyReadResult(obj, bufferAttribute, buffer);
+            if (!await ReadProfileBufferAsync(obj, bufferAttribute, meter, version, selection)) return;
             string summary = $"{obj.Obis}: {obj.ProfileTableStatus}";
             if (obj.ProfileBuffer is not null && obj.ProfileCaptureObjects is not null && obj.ProfileTable is null)
                 ReportError(summary);
@@ -1171,6 +1294,43 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 IsConnected = false;
                 ReportError("Соединение потеряно. Подключитесь повторно.");
             }
+        }
+    }
+
+    private async Task<bool> ReadProfileBufferAsync(MeterObjectViewModel obj, AttributeViewModel? attribute,
+        MeterConnection meter, int version, SelectiveAccess? selection = null)
+    {
+        int progressVersion = ++profileReadVersion;
+        ProfileReadProgress = default(ProfileBufferProgress);
+        var progress = new Progress<ProfileBufferProgress>(value =>
+        {
+            if (progressVersion == profileReadVersion && version == selectionVersion && meter == connection)
+                ProfileReadProgress = value;
+        });
+        try
+        {
+            var result = await meter.ReadProfileBufferAsync(obj.LogicalName, selection, progress, shutdown.Token);
+            if (version != selectionVersion || meter != connection) return false;
+
+            var buffer = new DlmsValue(DlmsType.Array, result.Rows);
+            if (attribute != null)
+            {
+                if (result.Type == DlmsType.Array)
+                    attribute.RememberReadValue(buffer);
+                else
+                    attribute.ForgetReadValue(); // The stream does not expose the compact array type description.
+                attribute.Value = DlmsDisplay.Collection(result.Type, result.Rows);
+                if (!attribute.HasDeclaredType)
+                    attribute.Type = $"{result.Type} ({(byte)result.Type})";
+            }
+            obj.ProfileBuffer = buffer;
+            UpdateProfileTable(obj);
+            return true;
+        }
+        finally
+        {
+            ++profileReadVersion;
+            ProfileReadProgress = null;
         }
     }
 
@@ -1251,15 +1411,22 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         try
         {
-            var result = await meter.ReadAsync(obj.ClassId, obj.LogicalName, attribute.Index);
+            if (obj.IsProfileGeneric && attribute.Index == ProfileGenericMembers.Attributes.Buffer)
+                return await ReadProfileBufferAsync(obj, attribute, meter, version);
+
+            var result = await meter.ReadAsync(obj.ClassId, obj.LogicalName, attribute.Index,
+                cancellationToken: shutdown.Token);
             if (version != selectionVersion || meter != connection) return false;
             ApplyReadResult(obj, attribute, result);
             return true;
         }
         catch (Exception error)
         {
-            if (version == selectionVersion)
+            if (version == selectionVersion && meter == connection)
+            {
+                attribute.ForgetReadValue();
                 attribute.Value = $"Ошибка: {error.Message}";
+            }
             return false;
         }
     }

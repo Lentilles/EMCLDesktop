@@ -21,14 +21,7 @@ On macOS, the **EMCL Desktop** application menu includes About and Connection se
 
 ## Running from source
 
-.NET SDK 10 is required. Place the `EMCLDesktop` and `EMCL` repositories next to each other: the application references `../EMCL/src/EMCL/EMCL.csproj` directly rather than using a prebuilt NuGet package.
-
-```text
-Repositories/
-  EMCLDesktop/
-  EMCL/
-    src/EMCL/EMCL.csproj
-```
+.NET SDK 10 is required. The application uses the EMCL 0.1.1 NuGet package; its version is pinned in `Directory.Packages.props`. A local EMCL checkout is not required to build or run the application.
 
 Run these commands from the `EMCLDesktop` repository root:
 
@@ -134,17 +127,29 @@ The catalog is grouped by COSEM class and version. Search covers OBIS, class nam
 
 ### Writing attributes
 
-Connect and read the tree for the current connection, then expand **Write value** (`Запись значения`) under an attribute. Choose the DLMS type, enter the new value, and click **Write to meter** (`Записать в счётчик`). **From read value** (`Из считанного`) copies the complete last response into the editor, including bytes and collection items omitted from the shortened display. Reads preserve an existing draft; drafts are not saved in configuration files. For an unknown type, read the attribute first or select its type explicitly.
+Connect and read the tree for the current connection, then click **Edit** (`Изменить`) next to the attribute value. The editor starts with the last read value when available. Choose the DLMS type, enter the new value, and click **Write to meter** (`Записать в счётчик`). **From read value** (`Из считанного`) copies the complete last response into the editor, including bytes and collection items omitted from the shortened display. Reading the attribute and closing the editor preserve the draft. Drafts are kept in memory. For an unknown type, read the attribute first or select its type explicitly.
+
+For an `OctetString` read from the meter, the format selector offers HEX, Windows-1251, UTF-8 and ASCII. Values that cannot be displayed losslessly in the selected encoding fall back to HEX. The write editor has its own format selector and uses the chosen encoding for input. Changing the input format preserves the draft bytes. If the draft cannot be converted, the editor keeps the previous format and draft.
 
 Integers use decimal notation; floating-point numbers use a decimal point. Numeric input is the raw wire value without scaler/unit conversion. Strings preserve whitespace. Octet strings and COSEM date/time values use HEX without a tag or length; the editor shows the required byte count. Arrays and structures use JSON lists of typed values, for example `[{"type":"Int8","value":-3},{"type":"Enum","value":30}]`. A nested array or structure has another list as its `value`. CompactArray uses the complete A-XDR value in HEX, including its tag.
 
-Writing requires negotiated `Set` Conformance and write access in the tree read from the current connection. Saved access rights alone do not enable writes. `logical_name` is read-only. Association LN v1 authenticated write access requires an authenticated connection; v3 rights requiring message protection are unavailable. The reason a write is unavailable appears in the editor.
+Writing requires negotiated `Set` Conformance and write access in the tree read from the current connection. Saved access rights alone do not enable writes. `logical_name` is read-only. Association LN v1 authenticated write access requires an authenticated connection; v3 rights requiring message protection are unavailable. The tooltip on a disabled **Edit** button explains why writing is unavailable.
 
-The application performs one SET exchange without retries and displays the meter's error code on refusal. After a successful reply, it reads the actual value back when the association allows reading; write-only values are marked as confirmed without presenting the draft as read data. A failed read-back is reported separately from a successful write. A lost SET reply leaves the outcome unconfirmed: read the value before deciding whether to write again. Writes share the operation lock with reads and KeepAlive. Values that exceed the complete normal PDU are transferred through the library using service-specific SET blocks when `BlockTransferWithSet` is selected and negotiated. A missing block capability or a local transfer limit is reported before the first send; a lost final block acknowledgement leaves the outcome unconfirmed. Message protection requirements in Association LN v3 still prevent writing.
+The application performs one SET exchange without retries and displays the meter's error code on refusal. After a successful reply, it reads the actual value back when GET is negotiated and the association grants read access. Otherwise, the application shows the write confirmation. A failed read-back is reported separately from a successful write. If the SET reply is lost, read the value before deciding whether to write again. Writes share the operation lock with reads and KeepAlive.
+
+Values that exceed the complete normal PDU are transferred through EMCL 0.1.1 using service-specific SET blocks when `BlockTransferWithSet` is selected and negotiated. A missing block capability or a local transfer limit is reported before the first send. Timeout, cancellation after sending, or an invalid acknowledgement leaves the outcome unconfirmed and displays the underlying cause. Cancellation before sending preserves the last read value and is reported separately. Message protection requirements in Association LN v3 still prevent writing.
 
 Profile Generic supports reading the entire buffer, the first or last N entries, an entry-number interval, or a date range. To read the last N entries, the application first reads `entries_in_use`. Date ranges use the time column from `capture_objects` and the meter's time zone. If `capture_objects` has not been retrieved yet, the application reads it automatically.
 
 Ranges are sent to the meter using DLMS selective access, which requires the negotiated `SelectiveAccess` Conformance flag. The table displays 100 rows per page and labels columns with the source OBIS and captured attribute name. Both regular arrays and compact arrays are supported.
+
+### Invoking methods
+
+Connect, read the current object tree, and expand **Method invocation** (`Вызов метода`) on the selected object. Enable **Send parameter** (`Передать параметр`) to send a typed DLMS value. The editor preselects the catalog type when available and uses the same value syntax as attribute writes, with HEX for octet strings. To send an explicit DLMS `Null`, select `Null` and enter `null`. Clearing the checkbox omits the parameter. Click **Invoke method** (`Вызвать метод`) to send the request.
+
+Invocation requires negotiated `Action` and method access from the current association. Association LN v1 authenticated access requires an authenticated connection. Methods with v3 message protection requirements are unavailable. EMCL 0.1.1 supports normal ACTION within the negotiated PDU limits.
+
+The method card shows any returned value, a meter rejection code, or an unconfirmed outcome if the reply is lost. The application sends each invocation once. After a confirmed or unconfirmed invocation, reread the object's attributes to get their current values.
 
 ## Saving and loading
 
@@ -188,7 +193,7 @@ Both HEX modes show the raw exchange without masking, including transmitted pass
 ## Limitations
 
 - Invoking methods is not yet implemented in the UI. ACTION parsing in the inspector does not mean the application can send these requests.
-- SET values must fit the negotiated PDU size; block transfer for SET and protected SET are not supported.
+- SET values larger than a normal PDU require negotiated `BlockTransferWithSet` and must fit the configured message and block-count limits. Protected SET is not supported.
 - Association LN v3 access protection bits are displayed, but protected GET requests are not performed: the current EMCL client does not support encrypted or signed communication.
 - Large collections are shortened for display; decoding limits are controlled by EMCL.
 - The inspector does not decrypt protected APDUs; it shows raw bytes and diagnostics.

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using EMCLDesktop.Services;
 using EMCLDesktop.ViewModels;
 using System.Text;
 
@@ -168,6 +169,19 @@ public partial class MainView : UserControl
             await viewModel.ReadAttributeAsync(attribute);
     }
 
+    private void ToggleWriteEditorClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: AttributeViewModel attribute })
+            attribute.ToggleWriteEditor();
+    }
+
+    private void WriteOctetFormatChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox { DataContext: AttributeViewModel attribute, SelectedItem: OctetStringFormat format } box &&
+            !attribute.TryChangeWriteOctetFormat(format))
+            box.SetCurrentValue(ComboBox.SelectedItemProperty, attribute.WriteOctetFormat);
+    }
+
     private async void WriteAttributeClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { DataContext: AttributeViewModel attribute } &&
@@ -179,6 +193,13 @@ public partial class MainView : UserControl
     {
         if (sender is Control { DataContext: AttributeViewModel attribute })
             attribute.UseReadValue();
+    }
+
+    private async void InvokeMethodClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: MethodViewModel method } &&
+            DataContext is MainViewModel viewModel)
+            await viewModel.InvokeMethodAsync(method);
     }
 
     private async void ReadProfileClick(object? sender, RoutedEventArgs e)

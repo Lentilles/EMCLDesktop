@@ -69,14 +69,61 @@ internal static class AttributeWriteChecks
         Check(attr.WriteType is null && !attr.CanUseReadValue, "Unknown type was guessed");
         var large = DlmsValue.Octets(Enumerable.Range(0, 200).Select(i => (byte)i).ToArray());
         attr.RememberReadValue(large);
-        attr.UseReadValue();
-        Check(DlmsValueEditor.Parse(attr.WriteType!.Value, attr.WriteText).Bytes.SequenceEqual(large.Bytes),
+        attr.ToggleWriteEditor();
+        Check(!attr.IsWriteEditorOpen, "Editor opened without write access");
+        attr.IsWriteEnabled = true;
+        attr.ToggleWriteEditor();
+        Check(attr.IsWriteEditorOpen &&
+            DlmsValueEditor.Parse(attr.WriteType!.Value, attr.WriteText).Bytes.SequenceEqual(large.Bytes),
             "Editor copied a shortened display value");
         attr.WriteText = "draft";
         attr.RememberReadValue(DlmsValue.Octets([1, 2]));
         Check(attr.WriteText == "draft", "A read overwrote the draft");
+        attr.WriteText = "";
+        attr.ToggleWriteEditor();
+        attr.ToggleWriteEditor();
+        Check(attr.IsWriteEditorOpen && attr.WriteText == "", "Reopening replaced an intentionally empty draft");
+        attr.UseReadValue();
+        Check(attr.WriteText == "0102", "Editor did not copy the latest read value on request");
         attr.ForgetReadValue();
         Check(!attr.CanUseReadValue, "Stale pre-write value remained copyable");
+
+        var windows1251 = OctetStringFormat.Options.Single(format => format.Label == "Windows-1251");
+        var utf8 = OctetStringFormat.Options.Single(format => format.Label == "UTF-8");
+        var ascii = OctetStringFormat.Options.Single(format => format.Label == "ASCII");
+        foreach (var (format, input, hex) in new[]
+        {
+            (windows1251, "Привет", "CFF0E8E2E5F2"),
+            (utf8, "Привет ☀", "D09FD180D0B8D0B2D0B5D18220E29880"),
+            (ascii, " ABC \n", "20414243200A")
+        })
+        {
+            var value = DlmsValueEditor.Parse(DlmsType.OctetString, input, octetFormat: format);
+            Check(value.Type == DlmsType.OctetString && value.Bytes.SequenceEqual(Convert.FromHexString(hex)) &&
+                format.Format(value.Bytes.AsSpan()) == input, $"{format} octets lost bytes or whitespace");
+        }
+        Check(utf8.Format([0xC0, 0x80]) is null && ascii.Format([0xFF]) is null &&
+            windows1251.Format([0]) is null, "Binary octets were rendered as replacement or invisible control characters");
+        try
+        {
+            DlmsValueEditor.Parse(DlmsType.OctetString, "Я", octetFormat: ascii);
+            throw new Exception("Attribute write: ASCII accepted an unencodable character");
+        }
+        catch (FormatException) { count++; }
+
+        var octets = new AttributeViewModel(2, "value", null, "", true) { Value = "CFF0E8E2E5F2", IsWriteEnabled = true };
+        octets.RememberReadValue(DlmsValue.Octets(Convert.FromHexString(octets.Value)));
+        Check(octets.HasReadOctets && octets.DisplayedValue == octets.Value, "OctetString did not default to HEX");
+        octets.ReadOctetFormat = ascii;
+        Check(octets.DisplayedValue.Contains(octets.Value), "Invalid text preview did not fall back to HEX");
+        octets.ReadOctetFormat = windows1251;
+        octets.ToggleWriteEditor();
+        Check(octets.DisplayedValue == "Привет" && octets.WriteText == "Привет" && octets.WriteOctetFormat == windows1251,
+            "Editor did not start with the selected OctetString representation");
+        Check(!octets.TryChangeWriteOctetFormat(utf8) && octets.WriteText == "Привет" && octets.WriteOctetFormat == windows1251,
+            "An invalid format change replaced the draft");
+        Check(octets.TryChangeWriteOctetFormat(OctetStringFormat.Hex) && octets.WriteText == octets.Value,
+            "Changing the draft format changed its bytes");
 
         for (byte mode = 0; mode <= 6; mode++)
         {
@@ -88,20 +135,42 @@ internal static class AttributeWriteChecks
             Check(MeterConnection.AllowsWrite(new AttributeAccess(2, (byte)mode, []), 3, ClientAuthentication.High) ==
                 (mode is 2 or 3), "v3 protected or readonly write allowed");
 
-        foreach (var outcome in new[] { "ok", "reject", "lost", "read-fails", "write-only", "no-set", "no-tree",
-            "boundary", "blocks-ok", "blocks-reject-first", "blocks-reject-middle", "blocks-reject-last", "blocks-lost", "blocks-no-support" })
+        await using (var settings = new MainViewModel())
+        await using (var restored = new MainViewModel())
+        {
+            var option = settings.ConformanceOptions.Single(o => o.Flag == DlmsConformance.BlockTransferWithSet);
+            Check(option.IsSelected, "SET blocks are not enabled for new connections");
+            foreach (bool enabled in new[] { false, true })
+            {
+                option.IsSelected = enabled;
+                await using var json = new MemoryStream();
+                await settings.SaveConfigurationAsync(json);
+                json.Position = 0;
+                await restored.LoadConfigurationAsync(json);
+                Check(!restored.HasStatusError && restored.ConformanceOptions.Single(o =>
+                    o.Flag == DlmsConformance.BlockTransferWithSet).IsSelected == enabled,
+                    "Saved SET block capability was not restored");
+            }
+        }
+
+        foreach (var outcome in new[] { "ok", "octet-text", "reject", "lost", "read-fails", "write-only", "no-get", "no-set", "no-tree",
+            "boundary", "boundary-plus", "blocks-ok", "blocks-reject-first", "blocks-reject-middle", "blocks-reject-last",
+            "blocks-lost", "blocks-no-support", "blocks-limit", "blocks-too-small", "blocks-bad-number", "blocks-bad-invoke",
+            "blocks-bad-final", "blocks-cancel", "blocks-timeout", "cancel-before" })
         {
             var channel = new MeterChannel(outcome);
+            var transferLimits = new ProtocolLimits { MaxBlockCount = outcome == "blocks-limit" ? 2 : 4096 };
             var session = new DlmsClientSession(channel, new ClientSessionOptions
             {
-                RequestTimeout = TimeSpan.FromSeconds(2),
+                Limits = transferLimits,
+                RequestTimeout = TimeSpan.FromMilliseconds(outcome == "blocks-timeout" ? 250 : 2000),
                 Association = new LnAssociationOptions { Authentication = ClientAuthentication.None }
             });
             await session.AssociateAsync();
             var name = LogicalName.Parse("1.0.0.2.0.255");
             var options = new MeterConnectionOptions("test", 1, "Wrapper", 16, 1, null, false, 1,
                 "0.0.40.0.0.255", ClientAuthentication.None, "", "UTF-8", 1, 1, 3600, 1024,
-                LnAssociationOptions.SupportedConformance, false, new ProtocolLimits());
+                LnAssociationOptions.SupportedConformance, false, transferLimits);
             var meter = (MeterConnection)Activator.CreateInstance(typeof(MeterConnection), BindingFlags.Instance | BindingFlags.NonPublic,
                 null, [session, ClientAuthentication.None, LogicalName.Parse(options.AssociationObis), TimeSpan.FromHours(1), options], null)!;
             if (outcome != "no-tree")
@@ -115,42 +184,69 @@ internal static class AttributeWriteChecks
             }
             await using var vm = new MainViewModel();
             typeof(MainViewModel).GetField("connection", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(vm, meter);
+            void CancelWrite() => ((CancellationTokenSource)typeof(MainViewModel)
+                .GetField("shutdown", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(vm)!).Cancel();
+            channel.CancelWrite = CancelWrite;
             vm.IsConnected = true;
             var obj = new MeterObjectViewModel(name, 1, 0, "Data");
-            bool largeWrite = outcome.StartsWith("blocks-") || outcome == "boundary";
-            var written = largeWrite ? DlmsValue.Octets(Enumerable.Range(0, outcome == "boundary" ? 49 : 140).Select(i => (byte)i).ToArray())
-                : DlmsValue.Number(DlmsType.UInt16, 77);
+            var written = outcome == "octet-text" ? DlmsValue.Octets([0xDF]) :
+                channel.UsesSmallPdu ? DlmsValue.Octets(Enumerable.Range(0, channel.PayloadLength).Select(i => (byte)i).ToArray()) :
+                DlmsValue.Number(DlmsType.UInt16, 77);
             var draft = DlmsValueEditor.Format(written);
             var attribute = new AttributeViewModel(2, "value", null, "", true)
                 { WriteType = written.Type, WriteText = draft, Value = "Old read" };
+            attribute.RememberReadValue(DlmsValue.Number(DlmsType.UInt16, 11));
             obj.Attributes.Add(attribute);
             vm.Objects.Add(obj);
             vm.SelectedObject = obj;
             Check(attribute.IsWriteEnabled == (outcome is not ("no-set" or "no-tree")), "Write availability ignored live association");
+            if (outcome == "octet-text")
+            {
+                Check(attribute.TryChangeWriteOctetFormat(windows1251), "Could not choose Windows-1251 for writing");
+                attribute.ReadOctetFormat = windows1251;
+                attribute.WriteText = draft = "Я";
+            }
+            if (outcome == "cancel-before") CancelWrite();
             await vm.WriteAttributeAsync(attribute);
             Check(!vm.IsBusy && attribute.WriteText == draft, "Write lost draft or busy state");
-            Check(channel.Sets == (outcome is "no-set" or "no-tree" or "blocks-no-support" ? 0 : 1), "SET retried or bypassed a guard");
-            if (outcome is "blocks-ok" or "boundary")
+            bool unsent = outcome is "no-set" or "no-tree" or "blocks-no-support" or "blocks-limit" or "blocks-too-small" or "cancel-before";
+            Check(channel.Sets == (unsent ? 0 : 1), "SET retried or bypassed a guard");
+            if (outcome is "blocks-ok" or "boundary" or "boundary-plus")
             {
                 Check(!vm.HasStatusError && channel.WritesApplied == 1 && channel.Gets == 1 &&
                     attribute.LastReadValue is not null && codec.EncodeBytes(attribute.LastReadValue).SequenceEqual(codec.EncodeBytes(written)),
                     "Large SET was not applied exactly once and read back");
-                Check(channel.BlockRequests == (outcome == "boundary" ? 0 : 3), "Incorrect block count or normal-PDU boundary");
+                Check(channel.BlockRequests == (outcome == "boundary" ? 0 : outcome == "boundary-plus" ? 2 : 3),
+                    "Incorrect block count or normal-PDU boundary");
             }
             if (outcome.StartsWith("blocks-reject"))
                 Check(vm.HasStatusError && channel.WritesApplied == 0 && channel.Gets == 0 &&
                     attribute.WriteStatus.Contains("ReadWriteDenied") && vm.IsConnected,
                     "Block rejection lost meter result or faulted the connection");
-            if (outcome == "blocks-lost")
-                Check(vm.HasStatusError && channel.WritesApplied == 1 && channel.BlockRequests == 3 && channel.Gets == 0 &&
-                    !vm.IsConnected && attribute.WriteStatus.Contains("не подтверждена"),
+            if (outcome is "blocks-lost" or "blocks-bad-final" or "blocks-bad-number" or "blocks-bad-invoke" or "blocks-cancel" or "blocks-timeout")
+            {
+                int expectedBlocks = outcome is "blocks-lost" or "blocks-bad-final" ? 3 :
+                    outcome is "blocks-cancel" or "blocks-timeout" ? 2 : 1;
+                int expectedApplied = outcome is "blocks-lost" or "blocks-bad-final" ? 1 : 0;
+                Check(vm.HasStatusError && channel.WritesApplied == expectedApplied && channel.BlockRequests == expectedBlocks && channel.Gets == 0 &&
+                    !vm.IsConnected && attribute.WriteStatus.Contains("не подтверждена") && attribute.LastReadValue is null,
                     "Missing final confirmation retried an applied SET or reported a definite outcome");
-            if (outcome == "blocks-no-support")
+                if (outcome.StartsWith("blocks-bad-"))
+                    Check(!attribute.WriteStatus.Contains("The SET outcome is unconfirmed"), "Protocol failure cause was hidden by the wrapper");
+            }
+            if (outcome is "blocks-no-support" or "blocks-limit" or "blocks-too-small")
                 Check(vm.HasStatusError && channel.BlockRequests == 0 && channel.WritesApplied == 0 && vm.IsConnected &&
-                    attribute.WriteStatus.Contains("не выполнена"), "Unnegotiated blocks were sent or treated as an uncertain write");
+                    attribute.WriteStatus.Contains("не выполнена") && attribute.LastReadValue?.AsUInt64() == 11,
+                    "A failed preflight sent SET or discarded the last read");
+            if (outcome == "cancel-before")
+                Check(vm.HasStatusError && channel.Gets == 0 && vm.IsConnected && attribute.WriteStatus.Contains("до отправки") &&
+                    attribute.LastReadValue?.AsUInt64() == 11, "Cancellation before sending was reported as an uncertain write");
             if (outcome == "ok")
                 Check(channel.Gets == 1 && attribute.Value == "78" && !vm.HasStatusError,
                     "Write did not show the actual read-back value");
+            if (outcome == "octet-text")
+                Check(channel.Gets == 1 && attribute.Value == "DF" && attribute.DisplayedValue == "Я" && !vm.HasStatusError,
+                    "SET sent an incorrect OctetString type or encoding");
             if (outcome == "reject")
                 Check(vm.HasStatusError && channel.Gets == 0 && attribute.Value == "Old read" &&
                     attribute.WriteStatus.Contains("ReadWriteDenied"), "Refusal lost the device error or changed read value");
@@ -160,9 +256,9 @@ internal static class AttributeWriteChecks
             if (outcome == "read-fails")
                 Check(vm.HasStatusError && attribute.WriteStatus.Contains("Запись подтверждена, но") &&
                     attribute.LastReadValue is null, "Read-back failure masked confirmed SET");
-            if (outcome == "write-only")
+            if (outcome is "write-only" or "no-get")
                 Check(channel.Gets == 0 && !vm.HasStatusError && attribute.Value.Contains("не считано"),
-                    "Write-only attribute was read or its draft presented as actual data");
+                    "Read-back was attempted without read access or negotiated GET");
         }
         return count;
     }
@@ -175,6 +271,9 @@ internal static class AttributeWriteChecks
         public int Gets { get; private set; }
         public int BlockRequests { get; private set; }
         public int WritesApplied { get; private set; }
+        public bool UsesSmallPdu => outcome.StartsWith("blocks-") || outcome.StartsWith("boundary");
+        public int PayloadLength => outcome == "boundary" ? 49 : outcome == "boundary-plus" ? 50 : 140;
+        public Action? CancelWrite { get; set; }
         private readonly MemoryStream blockData = new();
         private uint expectedBlock = 1;
         private DlmsValue? stored;
@@ -184,34 +283,44 @@ internal static class AttributeWriteChecks
             BlockRequests++;
             if (number != expectedBlock++) throw new Exception("SET block number repeated or skipped");
             blockData.Write(data.AsSpan());
+            if (outcome == "blocks-bad-number") return new SetBlockResponse(invoke, number + 1);
+            if (outcome == "blocks-bad-invoke") return new SetBlockResponse((byte)(invoke ^ 0x80), number);
+            if (outcome is "blocks-cancel" or "blocks-timeout" && number == 2)
+            {
+                if (outcome == "blocks-cancel") CancelWrite!();
+                return null;
+            }
             if (outcome == "blocks-reject-first" && number == 1 ||
                 outcome == "blocks-reject-middle" && number == 2 ||
                 outcome == "blocks-reject-last" && last)
-                return new SetBlockResponse(invoke, number, CosemError.ReadWriteDenied);
+                return new SetBlockResponse(invoke, number, CosemResultCode.ReadWriteDenied);
             if (!last) return new SetBlockResponse(invoke, number);
             var decoded = new AxdrCodec().Decode(new ReadOnlySequence<byte>(blockData.ToArray()));
             if (decoded.Status != DecodeStatus.Done || decoded.Consumed != blockData.Length ||
-                !decoded.Value!.Bytes.SequenceEqual(Enumerable.Range(0, 140).Select(i => (byte)i)))
+                !decoded.Value!.Bytes.SequenceEqual(Enumerable.Range(0, PayloadLength).Select(i => (byte)i)))
                 throw new Exception("SET blocks changed the encoded value");
             stored = decoded.Value;
             WritesApplied++;
             if (outcome == "blocks-lost") { replies.Writer.TryComplete(); return null; }
-            return new SetBlockResponse(invoke, number, CosemError.Success);
+            if (outcome == "blocks-bad-final") return new SetBlockResponse(invoke, number);
+            return new SetBlockResponse(invoke, number, CosemResultCode.Success);
         }
 
         public ValueTask SendAsync(ReadOnlyMemory<byte> apdu, CancellationToken cancellationToken = default)
         {
             DlmsApdu? response;
-            if (apdu.Span[0] == (byte)ApduTag.SetRequest && (outcome.StartsWith("blocks-") || outcome == "boundary") && apdu.Length > 64)
+            int pduLimit = outcome == "blocks-too-small" ? 19 : UsesSmallPdu ? 64 : 1024;
+            if (apdu.Span[0] == (byte)ApduTag.SetRequest && apdu.Length > pduLimit)
                 throw new Exception("SET exceeded the server PDU");
             var decoded = codec.Decode(new ReadOnlySequence<byte>(apdu));
             switch (decoded.Value)
             {
                 case AcseApdu { Kind: AcseKind.Aarq }:
                     var flags = LnAssociationOptions.SupportedConformance & ~DlmsConformance.PriorityManagement;
+                    if (outcome == "no-get") flags &= ~DlmsConformance.Get;
                     if (outcome == "no-set") flags &= ~DlmsConformance.Set;
                     if (outcome == "blocks-no-support") flags &= ~DlmsConformance.BlockTransferWithSet;
-                    response = AcseApdu.Aare(codec.EncodeBytes(new InitiateResponse(null, DlmsNegotiation.Version6, (uint)flags, (ushort)(outcome.StartsWith("blocks-") || outcome == "boundary" ? 64 : 1024))));
+                    response = AcseApdu.Aare(codec.EncodeBytes(new InitiateResponse(null, DlmsNegotiation.Version6, (uint)flags, (ushort)pduLimit)));
                     break;
                 case AcseApdu { Kind: AcseKind.Rlrq }:
                     response = AcseApdu.Release(response: true);
@@ -229,7 +338,7 @@ internal static class AttributeWriteChecks
                     if (request.Operation.Kind == CosemOperationKind.Write)
                     {
                         Sets++;
-                        if (outcome == "boundary")
+                        if (outcome is "boundary" or "octet-text")
                         {
                             stored = request.Operation.Value;
                             WritesApplied++;
@@ -241,13 +350,13 @@ internal static class AttributeWriteChecks
                             throw new Exception("SET target or wire value changed");
                         if (outcome == "lost") throw new IOException("Connection lost after sending SET");
                         response = new LnResponse(request.Operation.Kind, request.InvokeIdAndPriority,
-                            outcome == "reject" ? new OperationResult(CosemError.ReadWriteDenied) : OperationResult.Ok());
+                            outcome == "reject" ? new OperationResult(CosemResultCode.ReadWriteDenied) : OperationResult.Ok());
                     }
                     else
                     {
                         Gets++;
                         response = new LnResponse(request.Operation.Kind, request.InvokeIdAndPriority,
-                            outcome == "read-fails" ? new OperationResult(CosemError.ReadWriteDenied) :
+                            outcome == "read-fails" ? new OperationResult(CosemResultCode.ReadWriteDenied) :
                                 OperationResult.Ok(stored ?? DlmsValue.Number(DlmsType.UInt16, 78)));
                     }
                     break;

@@ -55,6 +55,10 @@ public sealed record MeterConnectionOptions(
 
 public readonly record struct ObjectListProgress(int Current, int Total);
 
+internal readonly record struct ProfileBufferProgress(int RowsRead, int? TotalRows, int BytesRead, int? TotalBytes);
+
+internal readonly record struct ProfileBufferReadResult(DlmsType Type, ImmutableArray<DlmsValue> Rows);
+
 public sealed class MeterConnection : IAsyncDisposable
 {
     // EMCL currently applies RequestTimeout to the entire exchange. The byte transport
@@ -245,6 +249,7 @@ public sealed class MeterConnection : IAsyncDisposable
     }
 
     public bool CanRead(LogicalName obis, sbyte index) =>
+        IsActive && (session.NegotiatedParameters!.Conformance & DlmsConformance.Get) != 0 &&
         Association?.Access.Rights.TryGetValue(obis, out var rights) == true &&
         CanRead(rights.Attributes.FirstOrDefault(item => item.Index == index));
 
@@ -269,6 +274,51 @@ public sealed class MeterConnection : IAsyncDisposable
         }
     }
 
+    public string InvokeUnavailableReason(ushort classId, LogicalName obis, sbyte index)
+    {
+        if (!IsActive) return "Подключитесь к счётчику для вызова метода.";
+        if ((session.NegotiatedParameters!.Conformance & DlmsConformance.Action) == 0)
+            return "ACTION не согласован со счётчиком. Проверьте флаг Action в настройках соединения.";
+        if (Association is not { } imported)
+            return "Считайте дерево текущего соединения, чтобы проверить права вызова.";
+        if (!imported.Catalog.Objects.Any(obj => obj.LogicalName == obis && obj.Descriptor.Key.ClassId == classId) ||
+            !imported.Access.Rights.TryGetValue(obis, out var rights))
+            return "Объект отсутствует в дереве текущего соединения.";
+
+        var access = rights.Methods.FirstOrDefault(item => item.Index == index);
+        bool allowed = (imported.Access.AssociationVersion, access?.RawMode) switch
+        {
+            (1, (byte)MethodAccessModeV1.Access) or (3, (byte)AccessModeV3.Invoke) => true,
+            (1, (byte)MethodAccessModeV1.AuthenticatedAccess) => authentication != ClientAuthentication.None,
+            _ => false
+        };
+        return allowed ? "" : "Ассоциация не разрешает вызов либо требует неподдерживаемой защиты сообщений.";
+    }
+
+    public async Task<DlmsValue?> InvokeAsync(ushort classId, LogicalName obis, sbyte index, DlmsValue? parameter,
+        CancellationToken cancellationToken = default)
+    {
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string reason = InvokeUnavailableReason(classId, obis, index);
+            if (reason.Length != 0) throw new InvalidOperationException(reason);
+            try
+            {
+                return await session.ActionAsync(classId, obis, index, parameter, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref lastActivityTimestamp, Stopwatch.GetTimestamp());
+            }
+        }
+        finally
+        {
+            operationGate.Release();
+        }
+    }
+
     public async Task<DlmsValue> ReadAsync(ushort classId, LogicalName obis, sbyte index,
         SelectiveAccess? selection = null, CancellationToken cancellationToken = default)
     {
@@ -282,6 +332,40 @@ public sealed class MeterConnection : IAsyncDisposable
         }
         finally
         {
+            operationGate.Release();
+        }
+    }
+
+    internal async Task<ProfileBufferReadResult> ReadProfileBufferAsync(LogicalName obis, SelectiveAccess? selection,
+        IProgress<ProfileBufferProgress> progress, CancellationToken cancellationToken)
+    {
+        await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var stream = await session.OpenProfileBufferAsync(obis, selection, cancellationToken)
+                .ConfigureAwait(false);
+            var rows = ImmutableArray.CreateBuilder<DlmsValue>();
+            int? totalRows = stream.TotalCount;
+            int? totalBytes = stream.TotalBytes;
+            progress.Report(new(0, totalRows, 0, totalBytes));
+            var lastReport = Stopwatch.GetTimestamp();
+            await foreach (var row in stream.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add(row);
+                int count = stream.CurrentCount;
+                int bytes = stream.CurrentBytes;
+                if (count != 1 && count != totalRows && bytes != totalBytes &&
+                    Stopwatch.GetElapsedTime(lastReport) < TimeSpan.FromMilliseconds(50))
+                    continue;
+                progress.Report(new(count, totalRows, bytes, totalBytes));
+                lastReport = Stopwatch.GetTimestamp();
+            }
+
+            return new(totalBytes.HasValue ? DlmsType.CompactArray : DlmsType.Array, rows.ToImmutable());
+        }
+        finally
+        {
+            Volatile.Write(ref lastActivityTimestamp, Stopwatch.GetTimestamp());
             operationGate.Release();
         }
     }

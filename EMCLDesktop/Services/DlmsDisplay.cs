@@ -56,17 +56,25 @@ internal static class DlmsDisplay
         return output.ToString();
     }
 
+    internal static string Collection(DlmsType type, ImmutableArray<DlmsValue> items)
+    {
+        var output = new StringBuilder();
+        int shown = 1;
+        AppendCollection(output, type, items, 0, ref shown);
+        return output.ToString();
+    }
+
+    private const int MaxDisplayedValues = 5000;
+
     private static void AppendValue(StringBuilder output, DlmsValue value, int depth,
         int? index, ref int shown)
     {
-        const int maxValues = 5000;
-        const int maxDepth = 64;
         if (output.Length > 0) output.AppendLine();
         output.Append(' ', depth * 2);
         if (index is not null) output.Append('[').Append(index.Value).Append("] ");
-        if (++shown > maxValues)
+        if (++shown > MaxDisplayedValues)
         {
-            output.Append("… показано первых ").Append(maxValues).Append(" значений");
+            output.Append("… показано первых ").Append(MaxDisplayedValues).Append(" значений");
             return;
         }
 
@@ -75,19 +83,7 @@ internal static class DlmsDisplay
             var items = value.Type == DlmsType.CompactArray
                 ? ((DlmsCompactArray)value.Value!).Rows
                 : value.Items;
-            output.Append(value.Type).Append(" (").Append(items.Length).Append(' ')
-                .Append(ElementWord(items.Length)).Append(')');
-            if (depth >= maxDepth)
-            {
-                output.Append(" · достигнута максимальная глубина отображения");
-                return;
-            }
-            int itemIndex = 0;
-            for (; itemIndex < items.Length && shown < maxValues; itemIndex++)
-                AppendValue(output, items[itemIndex], depth + 1, itemIndex, ref shown);
-            if (itemIndex < items.Length)
-                output.AppendLine().Append(' ', (depth + 1) * 2)
-                    .Append("… достигнут предел отображения ").Append(maxValues).Append(" значений");
+            AppendCollection(output, value.Type, items, depth, ref shown);
             return;
         }
 
@@ -103,6 +99,25 @@ internal static class DlmsDisplay
         }
         else
             output.Append(Convert.ToString(value.Value, CultureInfo.InvariantCulture) ?? "null");
+    }
+
+    private static void AppendCollection(StringBuilder output, DlmsType type, ImmutableArray<DlmsValue> items,
+        int depth, ref int shown)
+    {
+        const int maxDepth = 64;
+        output.Append(type).Append(" (").Append(items.Length).Append(' ')
+            .Append(ElementWord(items.Length)).Append(')');
+        if (depth >= maxDepth)
+        {
+            output.Append(" · достигнута максимальная глубина отображения");
+            return;
+        }
+        int itemIndex = 0;
+        for (; itemIndex < items.Length && shown < MaxDisplayedValues; itemIndex++)
+            AppendValue(output, items[itemIndex], depth + 1, itemIndex, ref shown);
+        if (itemIndex < items.Length)
+            output.AppendLine().Append(' ', (depth + 1) * 2)
+                .Append("… достигнут предел отображения ").Append(MaxDisplayedValues).Append(" значений");
     }
 
     private static string ElementWord(int count) =>

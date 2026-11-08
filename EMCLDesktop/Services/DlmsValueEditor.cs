@@ -31,7 +31,8 @@ public static class DlmsValueEditor
         _ => "Целое десятичное число в диапазоне выбранного типа. Без пересчёта scaler/unit."
     };
 
-    public static DlmsValue Parse(DlmsType type, string text, ProtocolLimits? limits = null)
+    public static DlmsValue Parse(DlmsType type, string text, ProtocolLimits? limits = null,
+        OctetStringFormat? octetFormat = null)
     {
         var bounds = ProtocolLimits.Resolve(limits);
         if (text.Length > (long)bounds.MaxMessageBytes * 8)
@@ -45,6 +46,8 @@ public static class DlmsValueEditor
                 int remaining = bounds.MaxCollectionItems;
                 value = ParseCollection(type, json.RootElement, bounds, ref remaining);
             }
+            else if (type == DlmsType.OctetString && octetFormat is not null)
+                value = DlmsValue.Octets(octetFormat.Parse(text));
             else
                 value = ParseScalar(type, text, bounds);
             // The codec checks numeric ranges, exact date lengths, ASCII and complexity.
@@ -95,7 +98,7 @@ public static class DlmsValueEditor
             case DlmsType.DateTime:
             case DlmsType.Date:
             case DlmsType.Time:
-                return new(type, ParseHex(text));
+                return new(type, OctetStringFormat.ParseHex(text));
             case DlmsType.BitString:
                 if (trimmed.Any(c => c is not ('0' or '1')))
                     throw new FormatException("BitString должен содержать только 0 и 1.");
@@ -104,7 +107,7 @@ public static class DlmsValueEditor
                     if (trimmed[i] == '1') bits[i / 8] |= (byte)(0x80 >> (i % 8));
                 return new(type, new DlmsBitString(trimmed.Length, bits));
             case DlmsType.CompactArray:
-                var bytes = ParseHex(text);
+                var bytes = OctetStringFormat.ParseHex(text);
                 var decoded = new AxdrCodec(limits).Decode(new ReadOnlySequence<byte>(bytes));
                 if (decoded.Status != DecodeStatus.Done || decoded.Consumed != bytes.Length || decoded.Value?.Type != type)
                     throw new FormatException("Ожидается ровно одно полное значение CompactArray в A-XDR.");
@@ -139,9 +142,6 @@ public static class DlmsValueEditor
                 throw new FormatException("Выберите поддерживаемый тип значения.");
         }
     }
-
-    private static byte[] ParseHex(string text) =>
-        Convert.FromHexString(string.Concat(text.Where(c => !char.IsWhiteSpace(c))));
 
     public static string Format(DlmsValue value) => value.Type switch
     {
