@@ -652,8 +652,12 @@
                 <TextBlock Text="{Binding ConnectionState}" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
             <Button Classes="connection-action" Classes.connected="{Binding IsConnected}"
+                    IsVisible="{Binding !IsConnecting}"
                     Content="{Binding ConnectionActionText}" Command="{Binding ToggleConnectionCommand}"
                     ToolTip.Tip="{Binding ConnectionActionText}" AutomationProperties.Name="{Binding ConnectionActionText}" />
+            <Button Classes="connection-action" IsVisible="{Binding IsConnecting}"
+                    Content="Отменить" Command="{Binding CancelConnectionCommand}"
+                    ToolTip.Tip="Отменить подключение" AutomationProperties.Name="Отменить подключение" />
         </StackPanel>
 
     </Grid>

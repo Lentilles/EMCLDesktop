@@ -36,6 +36,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private int traceRefreshPending;
     private readonly CancellationTokenSource shutdown = new();
     private TaskCompletionSource? connecting;
+    private CancellationTokenSource? connectionCancellation;
     private int treeReadVersion;
     private int profileReadVersion;
     private int disposed;
@@ -143,7 +144,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public bool IsHdlc => Framing == "HDLC";
     public bool HasPassword => Authentication != "None";
     public bool HasNoSelectedObject => SelectedObject is null;
-    public string ConnectionState => IsConnecting ? "Подключение…" : IsDisconnecting ? "Отключение…"
+    public string ConnectionState => IsConnecting ?
+        (connectionCancellation?.IsCancellationRequested == true ? "Отмена подключения…" : "Подключение…")
+        : IsDisconnecting ? "Отключение…"
         : IsConnected ? "Подключено" : "Не подключено";
     public string ConnectionActionText => IsConnected || IsDisconnecting ? "Отключиться" : "Подключиться";
     public bool IsConnectionChanging => IsConnecting || IsDisconnecting;
@@ -262,7 +265,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         OnPropertyChanged(nameof(ConnectionActionText));
         OnPropertyChanged(nameof(IsConnectionChanging));
     }
-    partial void OnIsConnectingChanged(bool value) => NotifyConnectionDisplayChanged();
+    partial void OnIsConnectingChanged(bool value)
+    {
+        NotifyConnectionDisplayChanged();
+        CancelConnectionCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIsDisconnectingChanged(bool value) => NotifyConnectionDisplayChanged();
     partial void OnIsConnectedChanged(bool value)
     {
@@ -685,12 +692,27 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             await ConnectAsync();
     }
 
+    private bool CanCancelConnection() => IsConnecting && Volatile.Read(ref disposed) == 0 &&
+        connectionCancellation is { IsCancellationRequested: false };
+
+    [RelayCommand(CanExecute = nameof(CanCancelConnection))]
+    private void CancelConnection()
+    {
+        if (!CanCancelConnection()) return;
+        connectionCancellation?.Cancel();
+        OnPropertyChanged(nameof(ConnectionState));
+        CancelConnectionCommand.NotifyCanExecuteChanged();
+    }
+
     [RelayCommand]
     private async Task ConnectAsync()
     {
         if (Volatile.Read(ref disposed) != 0 || IsBusy || IsReading) return;
+        using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
+        var cancellationToken = attemptCancellation.Token;
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         connecting = finished;
+        connectionCancellation = attemptCancellation;
         IsBusy = true;
         IsConnecting = true;
         Status = "Подключение к счётчику…";
@@ -708,6 +730,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 // A faulted receive task can surface during disposal even after
                 // the session has closed its transport. Reconnection can continue.
             }
+            cancellationToken.ThrowIfCancellationRequested();
             attemptedOptions = ParseOptions();
             trace.BeginConnection($"{attemptedOptions.Framing}/{attemptedOptions.Transport}");
             trace.Add($"Подключение к {attemptedOptions.Endpoint}, " +
@@ -722,10 +745,30 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 trace.Add($"Serial: BaudRate={serial.BaudRate}, DataBits={serial.DataBits}, " +
                           $"Parity={serial.Parity}, StopBits={serial.StopBits}, Handshake={serial.Handshake}, " +
                           $"DTR={serial.DtrEnable}, RTS={serial.RtsEnable}");
-            connection = await MeterConnection.OpenAsync(attemptedOptions, trace, shutdown.Token);
+            connection = await MeterConnection.OpenAsync(attemptedOptions, trace, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             connection.KeepAliveFailed += OnKeepAliveFailed;
             IsConnected = true;
             Status = "Подключено. Нажмите «Считать дерево», чтобы обновить каталог объектов.";
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                // The session may have opened just before the cancellation was observed.
+                await CloseConnectionAsync();
+            }
+            catch (Exception error)
+            {
+                trace.Add($"Ошибка при закрытии отменённого подключения: {error.GetType().Name}");
+            }
+            if (shutdown.IsCancellationRequested)
+                trace.Add("Подключение отменено при закрытии приложения");
+            else
+            {
+                Status = "Подключение отменено.";
+                trace.Add(Status);
+            }
         }
         catch (IOException error) when (attemptedOptions?.Framing == "HDLC" &&
                                          error.Message.Contains("HDLC link establishment (DM)",
@@ -757,11 +800,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                      $"Conformance {attemptedOptions.Conformance} и Max PDU {attemptedOptions.MaxReceivePduSize} " +
                      "с настройками этого счётчика.");
         }
-        catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
-        {
-            trace.Add("Подключение отменено при закрытии приложения");
-            // The window is closing; the connection is being disposed before the process exits.
-        }
         catch (Exception error)
         {
             trace.Add($"Ошибка подключения: {error.GetType().Name}");
@@ -769,10 +807,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         finally
         {
-            trace.Add($"Подключение {(IsConnected ? "успешно" : "не выполнено")}");
+            if (!cancellationToken.IsCancellationRequested)
+                trace.Add($"Подключение {(IsConnected ? "успешно" : "не выполнено")}");
+            connectionCancellation = null;
             IsConnecting = false;
-            IsBusy = false;
             connecting = null;
+            IsBusy = false;
             finished.TrySetResult();
         }
     }
