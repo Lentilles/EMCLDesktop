@@ -1281,7 +1281,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             if (version == selectionVersion)
             {
-                if (bufferAttribute != null) bufferAttribute.Value = $"Ошибка: {error.Message}";
+                if (bufferAttribute != null)
+                {
+                    bufferAttribute.ForgetReadValue();
+                    bufferAttribute.Value = $"Ошибка: {error.Message}";
+                }
                 obj.ProfileTableStatus = $"Ошибка чтения: {error.Message}";
                 ReportError($"{obj.Obis}: {error.Message}");
             }
@@ -1318,7 +1322,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 if (result.Type == DlmsType.Array)
                     attribute.RememberReadValue(buffer);
                 else
-                    attribute.ForgetReadValue(); // The stream does not expose the compact array type description.
+                    attribute.ShowStreamedCompactArray(result.Rows);
                 attribute.Value = DlmsDisplay.Collection(result.Type, result.Rows);
                 if (!attribute.HasDeclaredType)
                     attribute.Type = $"{result.Type} ({(byte)result.Type})";

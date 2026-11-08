@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using EMCL.Core.Objects;
@@ -95,7 +96,8 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WriteHint))]
     public partial OctetStringFormat WriteOctetFormat { get; private set; } = OctetStringFormat.Hex;
-    public IReadOnlyList<OctetStringFormat> OctetFormats => OctetStringFormat.Options;
+    public IReadOnlyList<OctetStringFormat> ReadOctetFormats => OctetStringFormat.ReadOptions;
+    public IReadOnlyList<OctetStringFormat> WriteOctetFormats => OctetStringFormat.Options;
     public IReadOnlyList<DlmsType> WriteTypes => DlmsValueEditor.Types;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WriteHint), nameof(IsWritingOctets))]
@@ -114,24 +116,18 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(DisplayedValue))]
     public partial DlmsValue? LastReadValue { get; private set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReadValueTree), nameof(ShowReadValueTree))]
+    public partial IReadOnlyList<DlmsValueNodeViewModel> ReadValueNodes { get; private set; } = [];
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowReadValueTree))]
+    public partial bool UseTextValueView { get; set; }
+    public bool HasReadValueTree => ReadValueNodes.Count != 0;
+    public bool ShowReadValueTree => HasReadValueTree && !UseTextValueView;
     public bool HasReadOctets => LastReadValue?.Type == DlmsType.OctetString;
     public bool IsWritingOctets => WriteType == DlmsType.OctetString;
-    public string DisplayedValue
-    {
-        get
-        {
-            if (ReadOctetFormat is not { } format || format == OctetStringFormat.Hex ||
-                LastReadValue is not { Type: DlmsType.OctetString } octets)
-                return Value;
-            if (format.Format(octets.Bytes.AsSpan()) is not { } text)
-                return $"{format}: значение не представимо как текст. HEX\n{Value}";
-
-            const int previewLength = 256;
-            if (text.Length <= previewLength) return text;
-            int end = char.IsHighSurrogate(text[previewLength - 1]) ? previewLength - 1 : previewLength;
-            return $"{text[..end]}… ({octets.Bytes.Length} байт)";
-        }
-    }
+    public string DisplayedValue => LastReadValue is { Type: DlmsType.OctetString } octets
+        ? DlmsDisplay.OctetPreview(octets, ReadOctetFormat, Value) : Value;
     public bool CanToggleWriteEditor => IsWriteEditorOpen || IsWriteEnabled;
     public string WriteEditorAction => IsWriteEditorOpen ? "Свернуть" : "Изменить";
     public string WriteHint => WriteType switch
@@ -150,7 +146,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
         if (!CanToggleWriteEditor) return;
         if (!hasOpenedWriteEditor)
         {
-            WriteOctetFormat = ReadOctetFormat ?? OctetStringFormat.Hex;
+            WriteOctetFormat = ReadOctetFormat is { CanParse: true } format ? format : OctetStringFormat.Hex;
             UseReadValue();
             hasOpenedWriteEditor = true;
         }
@@ -160,6 +156,8 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public void RememberReadValue(DlmsValue value)
     {
         LastReadValue = value;
+        var items = DlmsDisplay.CollectionItems(value);
+        ReadValueNodes = items.IsDefault ? [] : [DlmsValueNodeViewModel.Collection(value.Type, items)];
         CanUseReadValue = true;
         if (WriteType is null) WriteType = value.Type;
     }
@@ -167,7 +165,14 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public void ForgetReadValue()
     {
         LastReadValue = null;
+        ReadValueNodes = [];
         CanUseReadValue = false;
+    }
+
+    internal void ShowStreamedCompactArray(ImmutableArray<DlmsValue> rows)
+    {
+        ForgetReadValue(); // The stream does not expose the compact array type description.
+        ReadValueNodes = [DlmsValueNodeViewModel.Collection(DlmsType.CompactArray, rows)];
     }
 
     public void UseReadValue()
@@ -194,6 +199,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public bool TryChangeWriteOctetFormat(OctetStringFormat format)
     {
         if (format == WriteOctetFormat) return true;
+        if (!format.CanParse) return false;
         try
         {
             var bytes = WriteOctetFormat.Parse(WriteText);

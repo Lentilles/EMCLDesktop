@@ -100,6 +100,10 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
+        <Style Selector="TreeView.value-tree TreeViewItem" x:DataType="vm:DlmsValueNodeViewModel">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
         <Style Selector="TabItem">
             <Setter Property="FontSize" Value="14" />
             <Setter Property="Padding" Value="14,10" />
@@ -244,22 +248,56 @@
                                                                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                                                                         <TextBlock Text="ЗНАЧЕНИЕ" Classes="field-label"
                                                                                                    VerticalAlignment="Center" />
-                                                                                        <Button Grid.Column="1" Content="{Binding WriteEditorAction}"
-                                                                                                Classes="secondary" IsEnabled="{Binding CanToggleWriteEditor}"
-                                                                                                ToolTip.Tip="{Binding WriteUnavailableReason}"
-                                                                                                ToolTip.ServiceEnabled="{Binding !IsWriteEditorOpen}"
-                                                                                                ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
+                                                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                                                            <ToggleSwitch IsVisible="{Binding HasReadValueTree}"
+                                                                                                          IsChecked="{Binding UseTextValueView, Mode=TwoWay}"
+                                                                                                          OffContent="Текст" OnContent="Текст" VerticalAlignment="Center"
+                                                                                                          AutomationProperties.Name="Текстовый вид значения"
+                                                                                                          ToolTip.Tip="Переключить между деревом и текстом" />
+                                                                                            <Button Content="{Binding WriteEditorAction}"
+                                                                                                    Classes="secondary" IsEnabled="{Binding CanToggleWriteEditor}"
+                                                                                                    ToolTip.Tip="{Binding WriteUnavailableReason}"
+                                                                                                    ToolTip.ServiceEnabled="{Binding !IsWriteEditorOpen}"
+                                                                                                    ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
+                                                                                        </StackPanel>
                                                                                     </Grid>
                                                                                     <ComboBox IsVisible="{Binding HasReadOctets}"
-                                                                                              ItemsSource="{Binding OctetFormats}"
+                                                                                              ItemsSource="{Binding ReadOctetFormats}"
                                                                                               SelectedItem="{Binding ReadOctetFormat, Mode=TwoWay}"
                                                                                               AutomationProperties.Name="Формат считанного OctetString"
                                                                                               ToolTip.Tip="Формат считанного OctetString" />
                                                                                     <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
+                                                                                             IsVisible="{Binding !ShowReadValueTree}"
                                                                                              IsReadOnly="True" AcceptsReturn="True"
                                                                                              TextWrapping="Wrap" MinHeight="42"
                                                                                              MaxHeight="180"
                                                                                              ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                    <TreeView Classes="value-tree" ItemsSource="{Binding ReadValueNodes}"
+                                                                                              IsVisible="{Binding ShowReadValueTree}"
+                                                                                              MaxHeight="300" Background="#172438"
+                                                                                              BorderBrush="#31435B" BorderThickness="1"
+                                                                                              AutomationProperties.Name="Дерево считанного значения"
+                                                                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                                                        <TreeView.ItemTemplate>
+                                                                                            <TreeDataTemplate x:DataType="vm:DlmsValueNodeViewModel"
+                                                                                                              ItemsSource="{Binding Children}">
+                                                                                                <StackPanel Margin="4" Spacing="4">
+                                                                                                    <WrapPanel Orientation="Horizontal">
+                                                                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
+                                                                                                                   Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                                                                        <ComboBox IsVisible="{Binding IsOctetString}"
+                                                                                                                  ItemsSource="{Binding OctetFormats}"
+                                                                                                                  SelectedItem="{Binding OctetFormat, Mode=TwoWay}"
+                                                                                                                  AutomationProperties.Name="Формат вложенного OctetString"
+                                                                                                                  ToolTip.Tip="Формат вложенного OctetString" />
+                                                                                                    </WrapPanel>
+                                                                                                    <SelectableTextBlock IsVisible="{Binding IsScalar}" Text="{Binding DisplayedValue}"
+                                                                                                                         TextWrapping="Wrap" />
+                                                                                                </StackPanel>
+                                                                                            </TreeDataTemplate>
+                                                                                        </TreeView.ItemTemplate>
+                                                                                    </TreeView>
                                                                                 </StackPanel>
                                                                                 <Border IsVisible="{Binding IsWriteEditorOpen}"
                                                                                         BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="0,10,0,0">
@@ -300,7 +338,7 @@
                                                                                                   PlaceholderText="Выберите тип" MinWidth="180" />
                                                                                         <StackPanel IsVisible="{Binding IsWritingOctets}" Spacing="4">
                                                                                             <TextBlock Text="Формат ввода OctetString" Classes="field-label" />
-                                                                                            <ComboBox ItemsSource="{Binding OctetFormats}"
+                                                                                            <ComboBox ItemsSource="{Binding WriteOctetFormats}"
                                                                                                       SelectedItem="{Binding WriteOctetFormat, Mode=OneWay}"
                                                                                                       AutomationProperties.Name="Формат ввода OctetString"
                                                                                                       SelectionChanged="WriteOctetFormatChanged" />

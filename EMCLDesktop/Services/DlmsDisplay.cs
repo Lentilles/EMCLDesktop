@@ -64,6 +64,29 @@ internal static class DlmsDisplay
         return output.ToString();
     }
 
+    internal static ImmutableArray<DlmsValue> CollectionItems(DlmsValue value) => value.Type switch
+    {
+        DlmsType.Array or DlmsType.Structure => value.Items,
+        DlmsType.CompactArray => ((DlmsCompactArray)value.Value!).Rows,
+        _ => default
+    };
+
+    internal static string CollectionTitle(DlmsType type, int count) => $"{type} ({count} {ElementWord(count)})";
+
+    internal static string OctetPreview(DlmsValue octets, OctetStringFormat? format, string hex)
+    {
+        if (format is null || format == OctetStringFormat.Hex) return hex;
+        if (format.Format(octets.Bytes.AsSpan()) is not { } text)
+            return format == OctetStringFormat.DlmsDateTime
+                ? $"Данные не соответствуют формату DLMS date-time. HEX\n{hex}"
+                : $"{format}: значение не представимо как текст. HEX\n{hex}";
+
+        const int previewLength = 256;
+        if (text.Length <= previewLength) return text;
+        int end = char.IsHighSurrogate(text[previewLength - 1]) ? previewLength - 1 : previewLength;
+        return $"{text[..end]}… ({octets.Bytes.Length} байт)";
+    }
+
     private const int MaxDisplayedValues = 5000;
 
     private static void AppendValue(StringBuilder output, DlmsValue value, int depth,
@@ -78,11 +101,9 @@ internal static class DlmsDisplay
             return;
         }
 
-        if (value.Type is DlmsType.Array or DlmsType.Structure or DlmsType.CompactArray)
+        var items = CollectionItems(value);
+        if (!items.IsDefault)
         {
-            var items = value.Type == DlmsType.CompactArray
-                ? ((DlmsCompactArray)value.Value!).Rows
-                : value.Items;
             AppendCollection(output, value.Type, items, depth, ref shown);
             return;
         }
@@ -105,8 +126,7 @@ internal static class DlmsDisplay
         int depth, ref int shown)
     {
         const int maxDepth = 64;
-        output.Append(type).Append(" (").Append(items.Length).Append(' ')
-            .Append(ElementWord(items.Length)).Append(')');
+        output.Append(CollectionTitle(type, items.Length));
         if (depth >= maxDepth)
         {
             output.Append(" · достигнута максимальная глубина отображения");

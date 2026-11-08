@@ -125,6 +125,63 @@ internal static class AttributeWriteChecks
         Check(octets.TryChangeWriteOctetFormat(OctetStringFormat.Hex) && octets.WriteText == octets.Value,
             "Changing the draft format changed its bytes");
 
+        const string dateHex = "07EA0A07030D1F30FF800000";
+        const string datePreview = "2026-10-07 13:31:48 · ср · смещение UTC не задано · статус 0x00";
+        var dateFormat = OctetStringFormat.DlmsDateTime;
+        var dateValue = DlmsValue.Octets(Convert.FromHexString(dateHex));
+        var dateOctets = new AttributeViewModel(2, "time", null, "", true) { Value = dateHex, IsWriteEnabled = true };
+        dateOctets.RememberReadValue(dateValue);
+        dateOctets.ReadOctetFormat = dateFormat;
+        Check(dateOctets.ReadOctetFormats.Contains(dateFormat) && dateOctets.DisplayedValue == datePreview,
+            "DLMS date-time preview lost fields with unspecified hundredths and deviation");
+        dateOctets.ToggleWriteEditor();
+        Check(!dateOctets.WriteOctetFormats.Contains(dateFormat) && dateOctets.WriteOctetFormat == OctetStringFormat.Hex &&
+            dateOctets.WriteType == DlmsType.OctetString && dateOctets.WriteText == dateHex,
+            "A date-time preview altered the original OctetString in the write editor");
+        Check(dateFormat.Format(Convert.FromHexString("07EA0A07030D1F300CFF4C80")) ==
+            "2026-10-07 13:31:48.12 · ср · UTC+03:00 · статус 0x80" &&
+            dateFormat.Format(Convert.FromHexString("07EA0A07030D1F3000014A00"))?.Contains("UTC-05:30") == true,
+            "DLMS deviation did not convert to the local UTC offset");
+        Check(dateFormat.Format(Convert.FromHexString("FFFF0AFEFF0DFF30FF800000"))?.StartsWith("****-10-[последний день] 13:**:48") == true &&
+            dateFormat.Format(Convert.FromHexString("07EA021F030D1F30FF800000")) is null,
+            "DLMS date-time preview did not handle special or invalid dates");
+
+        var compound = new AttributeViewModel(2, "value", null, "", true);
+        var nested = DlmsValue.Array(DlmsValue.Structure(
+            DlmsValue.Octets([0xDF]), DlmsValue.Array(DlmsValue.Octets([0xD0, 0xAF])), DlmsValue.Null, dateValue));
+        compound.RememberReadValue(nested);
+        var fields = compound.ReadValueNodes.Single().Children.Single().Children;
+        var windowsLeaf = fields[0];
+        var utf8Leaf = fields[1].Children.Single();
+        Check(compound.HasReadValueTree && windowsLeaf.IsOctetString && utf8Leaf.IsOctetString &&
+            fields[2].DisplayedValue == "null" && windowsLeaf.DisplayedValue == "DF" && utf8Leaf.DisplayedValue == "D0AF",
+            "Nested values did not expose typed leaves with default HEX previews");
+        windowsLeaf.OctetFormat = windows1251;
+        Check(windowsLeaf.DisplayedValue == "Я" && utf8Leaf.DisplayedValue == "D0AF", "Leaf formats were not independent");
+        utf8Leaf.OctetFormat = utf8;
+        windowsLeaf.OctetFormat = ascii;
+        Check(utf8Leaf.DisplayedValue == "Я" && windowsLeaf.DisplayedValue.EndsWith("DF"),
+            "Nested text preview lost encoding or HEX fallback");
+        fields[3].OctetFormat = dateFormat;
+        utf8Leaf.OctetFormat = dateFormat;
+        Check(fields[3].OctetFormats.Contains(dateFormat) && fields[3].DisplayedValue == datePreview &&
+            utf8Leaf.DisplayedValue.EndsWith("D0AF"), "Nested DLMS date-time preview or HEX fallback is missing");
+        Check(compound.ShowReadValueTree, "Collection did not default to tree view");
+        compound.UseTextValueView = true;
+        Check(compound.HasReadValueTree && !compound.ShowReadValueTree, "Text view did not hide the tree");
+        compound.UseTextValueView = false;
+        Check(compound.ShowReadValueTree && compound.ReadValueNodes.Single().Children.Single().Children[0] == windowsLeaf,
+            "Switching back did not preserve the tree nodes");
+        compound.UseReadValue();
+        Check(codec.EncodeBytes(DlmsValueEditor.Parse(compound.WriteType!.Value, compound.WriteText))
+            .SequenceEqual(codec.EncodeBytes(nested)), "Tree display formats altered the value copied to the write editor");
+        compound.RememberReadValue(DlmsValue.Array(Enumerable.Repeat(DlmsValue.Null, 101).ToArray()));
+        var ranges = compound.ReadValueNodes.Single().Children;
+        Check(ranges.Count == 2 && ranges[0].Children.Count == 100 && ranges[1].Label.StartsWith("[100]"),
+            "A large array did not expose every original index");
+        compound.ForgetReadValue();
+        Check(!compound.HasReadValueTree && !compound.ShowReadValueTree, "A forgotten value left a stale tree");
+
         for (byte mode = 0; mode <= 6; mode++)
         {
             var access = new AttributeAccess(2, mode, []);
