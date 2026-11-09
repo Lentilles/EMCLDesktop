@@ -133,6 +133,23 @@
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="Padding" Value="0" />
         </Style>
+        <Style Selector="Button.settings-navigation">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#ACBED3" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.settings-navigation:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#273B53" />
+            <Setter Property="Foreground" Value="#F4F7FC" />
+        </Style>
+        <Style Selector="Button.settings-navigation:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#214A61" />
+        </Style>
         <Style Selector="Button.navigation">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -713,13 +730,19 @@
                     <StackPanel Spacing="16">
                         <TextBlock Text="Параметры подключения" Classes="section-title" TextWrapping="Wrap" />
                         <TextBlock Text="Изменения применяются к следующему подключению." Classes="muted" FontSize="12" />
+                        <StackPanel Spacing="4">
+                            <Button Classes="settings-navigation" Content="Подключение" Tag="Connection" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                            <Button Classes="settings-navigation" Content="Адресация" Tag="Address" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                            <Button Classes="settings-navigation" Content="Ассоциация и доступ" Tag="Association" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                            <Button Classes="settings-navigation" Content="Параметры обмена" Tag="Exchange" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                        </StackPanel>
                         <Button Classes="secondary" Content="Загрузить конфигурацию" Click="LoadConfigurationClick"
                                 HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditConfiguration}" />
                         <Button Classes="secondary" Content="Сохранить конфигурацию" Click="SaveConfigurationClick"
                                 HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditConfiguration}" />
                     </StackPanel>
                 </Border>
-                <views:ConnectionSettingsView Grid.Column="1" IsEnabled="{Binding CanEditConfiguration}" />
+                <views:ConnectionSettingsView x:Name="ConnectionSettings" Grid.Column="1" IsEnabled="{Binding CanEditConfiguration}" />
             </Grid>
         </Grid>
         <Border Grid.Column="1" Grid.Row="1" Padding="16,6" Background="{StaticResource WorkspaceContentBackground}"

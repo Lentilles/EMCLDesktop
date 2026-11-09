@@ -23,6 +23,12 @@ public partial class MainView : UserControl
             viewModel.SelectedTabIndex = section;
     }
 
+    private void SettingsNavigationClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { Tag: string section })
+            ConnectionSettings.NavigateTo(section);
+    }
+
     public void OpenConnectionSettings()
     {
         if (DataContext is MainViewModel viewModel)

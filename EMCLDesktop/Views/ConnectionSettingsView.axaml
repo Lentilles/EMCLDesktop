@@ -14,8 +14,8 @@
     </UserControl.Styles>
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" Background="{StaticResource WorkspaceContentBackground}">
         <StackPanel Spacing="0" HorizontalAlignment="Stretch">
-            <Grid ColumnDefinitions="*,*">
-                <Border Grid.Column="0" Classes="settings-section">
+            <StackPanel>
+                <Border x:Name="ConnectionSection" Classes="settings-section">
                     <StackPanel Spacing="16">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Подключение" Classes="section-title" />
@@ -88,7 +88,7 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="1" Classes="settings-section">
+                <Border x:Name="AddressSection" Classes="settings-section">
                     <StackPanel Spacing="16">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Адресация" Classes="section-title" />
@@ -115,9 +115,9 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
-            </Grid>
+            </StackPanel>
 
-            <Border Classes="settings-section">
+            <Border x:Name="AssociationSection" Classes="settings-section">
                 <StackPanel Spacing="16">
                     <StackPanel Spacing="3">
                         <TextBlock Text="Ассоциация и доступ" Classes="section-title" />
@@ -157,7 +157,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Classes="settings-section">
+            <Border x:Name="ExchangeSection" Classes="settings-section">
                 <StackPanel Spacing="16">
                     <StackPanel Spacing="3">
                         <TextBlock Text="Параметры обмена" Classes="section-title" />
@@ -221,9 +221,10 @@
                     </StackPanel>
                     <StackPanel Spacing="7">
                         <TextBlock Text="Conformance" Classes="field-label" />
+                        <Button x:Name="ConformanceToggle" Classes="secondary" Content="Выбрать / отменить все" Click="ToggleConformanceClick" HorizontalAlignment="Left" />
                         <ItemsControl ItemsSource="{Binding ConformanceOptions}">
                             <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ConformanceOptionViewModel">
