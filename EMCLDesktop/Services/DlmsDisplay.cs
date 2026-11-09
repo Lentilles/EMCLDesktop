@@ -88,19 +88,26 @@ internal static class DlmsDisplay
     internal static string NumericHex(DlmsValue value) =>
         $"0x{Convert.ToHexString(numericCodec.EncodeBytes(value).AsSpan(1))}";
 
-    internal static string OctetPreview(DlmsValue octets, OctetStringFormat? format, string hex)
+    internal static string NumericDecimal(DlmsValue value) =>
+        Convert.ToString(value.Value, CultureInfo.InvariantCulture) ?? "";
+
+    internal static string? OctetPreview(DlmsValue octets, OctetStringFormat format)
     {
-        if (format is null || format == OctetStringFormat.Hex) return hex;
-        if (format.Format(octets.Bytes.AsSpan()) is not { } text)
-            return format == OctetStringFormat.DlmsDateTime
-                ? $"Данные не соответствуют формату DLMS date-time. HEX\n{hex}"
-                : $"{format}: значение не представимо как текст. HEX\n{hex}";
+        if (format == OctetStringFormat.Hex) return Value(octets);
+        if (format.Format(octets.Bytes.AsSpan()) is not { } text) return null;
 
         const int previewLength = 256;
         if (text.Length <= previewLength) return text;
         int end = char.IsHighSurrogate(text[previewLength - 1]) ? previewLength - 1 : previewLength;
         return $"{text[..end]}… ({octets.Bytes.Length} байт)";
     }
+
+    internal static string UnavailableOctetPreview(OctetStringFormat format) =>
+        format == OctetStringFormat.DlmsDateTime
+            ? "Данные не соответствуют формату DLMS date-time"
+            : format == OctetStringFormat.DlmsDate || format == OctetStringFormat.LocalDate
+            ? "Данные не соответствуют формату DLMS date"
+            : "Значение не представимо как текст";
 
     private const int MaxDisplayedValues = 5000;
 
@@ -126,6 +133,9 @@ internal static class DlmsDisplay
         if (depth > 0) output.Append(value.Type).Append(": ");
         if (value.Type == DlmsType.Null)
             output.Append("null");
+        else if (IsNumeric(value.Type))
+            output.Append(NumericDecimal(value)).AppendLine()
+                .Append(' ', depth * 2).Append(NumericHex(value));
         else if (value.Value is ImmutableArray<byte> bytes)
         {
             var displayed = bytes.Take(64).ToArray();

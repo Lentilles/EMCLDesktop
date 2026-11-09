@@ -114,16 +114,50 @@ internal static class AttributeWriteChecks
         var octets = new AttributeViewModel(2, "value", null, "", true) { Value = "CFF0E8E2E5F2", IsWriteEnabled = true };
         octets.RememberReadValue(DlmsValue.Octets(Convert.FromHexString(octets.Value)));
         Check(octets.HasReadOctets && octets.DisplayedValue == octets.Value, "OctetString did not default to HEX");
+        var previews = octets.ReadOctetPreviews;
+        Check(previews.Select(preview => preview.Format).SequenceEqual(OctetStringFormat.ReadOptions) &&
+            previews.Single(preview => preview.Format == OctetStringFormat.Hex).Text == octets.Value &&
+            previews.Single(preview => preview.Format == windows1251).Text == "Привет" &&
+            previews.Single(preview => preview.Format == ascii).Text == "Значение не представимо как текст" &&
+            octets.ReadOctetFormat == OctetStringFormat.Hex, "The format list did not preview all options without selecting them");
         octets.ReadOctetFormat = ascii;
         Check(octets.DisplayedValue.Contains(octets.Value), "Invalid text preview did not fall back to HEX");
         octets.ReadOctetFormat = windows1251;
         octets.ToggleWriteEditor();
         Check(octets.DisplayedValue == "Привет" && octets.WriteText == "Привет" && octets.WriteOctetFormat == windows1251,
             "Editor did not start with the selected OctetString representation");
+        var draftPreviews = octets.WriteOctetPreviews;
+        Check(draftPreviews.Single(preview => preview.Format == OctetStringFormat.Hex).Text == octets.Value &&
+            draftPreviews.Single(preview => preview.Format == windows1251).Text == "Привет",
+            "The combined draft field did not preview its bytes in every encoding");
         Check(!octets.TryChangeWriteOctetFormat(utf8) && octets.WriteText == "Привет" && octets.WriteOctetFormat == windows1251,
             "An invalid format change replaced the draft");
         Check(octets.TryChangeWriteOctetFormat(OctetStringFormat.Hex) && octets.WriteText == octets.Value,
             "Changing the draft format changed its bytes");
+        Check(octets.TryChangeWriteOctetFormat(utf8) == false && octets.WriteOctetFormat == OctetStringFormat.Hex,
+            "An unrepresentable draft changed the combined field encoding");
+        octets.WriteText = "D0AF";
+        Check(draftPreviews.Single(preview => preview.Format == utf8).Text == "Я" &&
+            octets.TryChangeWriteOctetFormat(utf8) && octets.WriteText == "Я",
+            "Typing bytes did not refresh the dropdown or convert the full draft");
+        octets.WriteText = "Привет";
+        Check(ReferenceEquals(octets.WriteOctetPreviews, draftPreviews) &&
+            draftPreviews.Single(preview => preview.Format == OctetStringFormat.Hex).Text == "D09FD180D0B8D0B2D0B5D182" &&
+            DlmsValueEditor.Parse(DlmsType.OctetString, octets.WriteText, octetFormat: octets.WriteOctetFormat)
+                .Bytes.SequenceEqual(Convert.FromHexString("D09FD180D0B8D0B2D0B5D182")),
+            "Typing in the selected UTF-8 encoding did not produce the expected write bytes");
+        Check(octets.TryChangeWriteOctetFormat(OctetStringFormat.Hex), "Could not return the draft to HEX");
+        octets.WriteText = "F";
+        Check(draftPreviews.All(preview => preview.Text.Length == 0) &&
+            !octets.TryChangeWriteOctetFormat(ascii) && octets.WriteText == "F",
+            "An incomplete HEX draft left stale previews or was replaced on format change");
+        octets.RememberReadValue(DlmsValue.Octets([0x41]));
+        Check(ReferenceEquals(octets.ReadOctetPreviews, previews) &&
+            previews.Single(preview => preview.Format == ascii).Text == "A",
+            "Reading again did not refresh the previews in place");
+        octets.ForgetReadValue();
+        Check(!octets.HasReadOctets && previews.All(preview => preview.Text.Length == 0),
+            "A forgotten value left stale format previews");
 
         const string dateHex = "07EA0A07030D1F30FF800000";
         const string datePreview = "2026-10-07 13:31:48 · ср · смещение UTC не задано · статус 0x00";
@@ -132,7 +166,8 @@ internal static class AttributeWriteChecks
         var dateOctets = new AttributeViewModel(2, "time", null, "", true) { Value = dateHex, IsWriteEnabled = true };
         dateOctets.RememberReadValue(dateValue);
         dateOctets.ReadOctetFormat = dateFormat;
-        Check(dateOctets.ReadOctetFormats.Contains(dateFormat) && dateOctets.DisplayedValue == datePreview,
+        Check(dateOctets.ReadOctetPreviews.Single(preview => preview.Format == dateFormat).Text == datePreview &&
+            dateOctets.DisplayedValue == datePreview,
             "DLMS date-time preview lost fields with unspecified hundredths and deviation");
         dateOctets.ToggleWriteEditor();
         Check(!dateOctets.WriteOctetFormats.Contains(dateFormat) && dateOctets.WriteOctetFormat == OctetStringFormat.Hex &&
@@ -146,6 +181,71 @@ internal static class AttributeWriteChecks
             dateFormat.Format(Convert.FromHexString("07EA021F030D1F30FF800000")) is null,
             "DLMS date-time preview did not handle special or invalid dates");
 
+        const string calendarHex = "07EA0B0901";
+        var calendarValue = DlmsValueEditor.Parse(DlmsType.Date, calendarHex);
+        var calendar = new AttributeViewModel(2, "date", "Date", "", true)
+            { Value = calendarHex, IsWriteEnabled = true };
+        calendar.RememberReadValue(calendarValue);
+        Check(calendar.HasReadFormats && !calendar.HasReadOctets &&
+            calendar.ReadOctetFormat == OctetStringFormat.DlmsDate && calendar.DisplayedValue == "2026-11-09 · пн",
+            "Date did not default to a readable calendar date");
+        var calendarPreviews = calendar.ReadOctetPreviews;
+        Check(calendarPreviews.Select(preview => preview.Format).SequenceEqual(OctetStringFormat.DateReadOptions) &&
+            calendarPreviews[0].Text == calendarHex && calendarPreviews[1].Text == "2026-11-09 · пн" &&
+            calendarPreviews[2].Text == "09.11.2026 · пн",
+            "Date dropdown did not preview HEX, ISO and local dates together");
+        calendar.ReadOctetFormat = OctetStringFormat.LocalDate;
+        Check(calendar.DisplayedValue == "09.11.2026 · пн", "Date selection did not update the value field");
+        calendar.ToggleWriteEditor();
+        Check(calendar.WriteType == DlmsType.Date && calendar.WriteText == calendarHex &&
+            codec.EncodeBytes(DlmsValueEditor.Parse(calendar.WriteType.Value, calendar.WriteText))
+                .SequenceEqual(codec.EncodeBytes(calendarValue)),
+            "A calendar preview altered the Date type or bytes copied for writing");
+        calendar.ReadOctetFormat = OctetStringFormat.Hex;
+        Check(calendar.DisplayedValue == calendarHex, "Date HEX view changed the original bytes");
+        calendar.ReadOctetFormat = OctetStringFormat.LocalDate;
+        calendar.RememberReadValue(DlmsValueEditor.Parse(DlmsType.Date, "07EA0B0A02"));
+        Check(ReferenceEquals(calendar.ReadOctetPreviews, calendarPreviews) &&
+            calendar.DisplayedValue == "10.11.2026 · вт" && calendarPreviews[1].Text == "2026-11-10 · вт",
+            "Refreshing Date lost its format or left stale dropdown values");
+        foreach (var (hex, iso, local) in new (string, string, string)[]
+        {
+            ("FFFFFFFFFF", "****-**-**", "**.**.****"),
+            ("FFFF0AFEFF", "****-10-[последний день]", "[последний день].10.****"),
+            ("07EAFEFDFF", "2026-[начало летнего времени]-[предпоследний день]",
+                "[предпоследний день].[начало летнего времени].2026"),
+            ("07E8021D04", "2024-02-29 · чт", "29.02.2024 · чт"),
+            ("FFFF021DFF", "****-02-29", "29.02.****")
+        })
+            Check(OctetStringFormat.DlmsDate.Format(Convert.FromHexString(hex)) == iso &&
+                OctetStringFormat.LocalDate.Format(Convert.FromHexString(hex)) == local,
+                $"Date preview replaced a special DLMS field or rejected a valid leap day: {hex}");
+        foreach (string hex in new[] { "", "07EA0B09", "07EA0B090100", "07E7021D03", "07EA000901", "07EA0D0901", "07EA0B0001", "07EA0B2001", "07EA0B0900", "07EA0B0908" })
+            Check(OctetStringFormat.DlmsDate.Format(Convert.FromHexString(hex)) is null &&
+                OctetStringFormat.LocalDate.Format(Convert.FromHexString(hex)) is null,
+                $"An invalid Date was displayed as a calendar date: {hex}");
+        calendar.RememberReadValue(DlmsValueEditor.Parse(DlmsType.Date, "07E7021D03"));
+        Check(calendar.DisplayedValue.EndsWith("07E7021D03") && calendar.DisplayedValue.Contains("DLMS date"),
+            "Invalid Date did not explain the problem and preserve its raw bytes");
+        calendar.RememberReadValue(DlmsValue.Octets([0x41]));
+        Check(calendar.ReadOctetFormat == OctetStringFormat.Hex &&
+            calendar.ReadOctetPreviews.Select(preview => preview.Format).SequenceEqual(OctetStringFormat.ReadOptions),
+            "Changing the response type left Date options on an OctetString");
+        calendar.RememberReadValue(calendarValue);
+        var refreshedCalendarPreviews = calendar.ReadOctetPreviews;
+        calendar.ForgetReadValue();
+        Check(!calendar.HasReadFormats && refreshedCalendarPreviews.All(preview => preview.Text.Length == 0),
+            "Forgetting Date left a visible dropdown or stale date previews");
+        var calendarTree = new AttributeViewModel(2, "dates", null, "", true);
+        calendarTree.RememberReadValue(DlmsValue.Structure(calendarValue, DlmsValue.Array(calendarValue)));
+        var calendarNodes = calendarTree.ReadValueNodes.Single().Children;
+        var nestedCalendar = calendarNodes[1].Children.Single();
+        calendarNodes[0].ReadOctetFormat = OctetStringFormat.LocalDate;
+        Check(calendarNodes[0].HasReadFormats && calendarNodes[0].DisplayedValue == "09.11.2026 · пн" &&
+            nestedCalendar.HasReadFormats && nestedCalendar.DisplayedValue == "2026-11-09 · пн" &&
+            nestedCalendar.ReadOctetPreviews[0].Text == calendarHex,
+            "Nested Date fields did not expose independent calendar formats");
+
         var compound = new AttributeViewModel(2, "value", null, "", true);
         var nested = DlmsValue.Array(DlmsValue.Structure(
             DlmsValue.Octets([0xDF]), DlmsValue.Array(DlmsValue.Octets([0xD0, 0xAF])), DlmsValue.Null, dateValue));
@@ -156,6 +256,9 @@ internal static class AttributeWriteChecks
         Check(compound.HasReadValueTree && windowsLeaf.HasReadOctets && utf8Leaf.HasReadOctets &&
             fields[2].DisplayedValue == "null" && windowsLeaf.DisplayedValue == "DF" && utf8Leaf.DisplayedValue == "D0AF",
             "Nested values did not expose typed leaves with default HEX previews");
+        Check(windowsLeaf.ReadOctetPreviews.Single(preview => preview.Format == windows1251).Text == "Я" &&
+            utf8Leaf.ReadOctetPreviews.Single(preview => preview.Format == utf8).Text == "Я" &&
+            !fields[2].HasReadOctets, "Nested fields did not expose their own format previews");
         windowsLeaf.ReadOctetFormat = windows1251;
         Check(windowsLeaf.DisplayedValue == "Я" && utf8Leaf.DisplayedValue == "D0AF", "Leaf formats were not independent");
         utf8Leaf.ReadOctetFormat = utf8;
@@ -164,7 +267,8 @@ internal static class AttributeWriteChecks
             "Nested text preview lost encoding or HEX fallback");
         fields[3].ReadOctetFormat = dateFormat;
         utf8Leaf.ReadOctetFormat = dateFormat;
-        Check(fields[3].ReadOctetFormats.Contains(dateFormat) && fields[3].DisplayedValue == datePreview &&
+        Check(fields[3].ReadOctetPreviews.Single(preview => preview.Format == dateFormat).Text == datePreview &&
+            fields[3].DisplayedValue == datePreview &&
             utf8Leaf.DisplayedValue.EndsWith("D0AF"), "Nested DLMS date-time preview or HEX fallback is missing");
         Check(compound.ShowReadValueTree, "Collection did not default to tree view");
         compound.UseTextValueView = true;
@@ -200,17 +304,19 @@ internal static class AttributeWriteChecks
             numericAttribute.RememberReadValue(value);
             compound.RememberReadValue(DlmsValue.Structure(value, value));
             var numbers = compound.ReadValueNodes.Single().Children;
-            Check(numericAttribute.CanChooseReadFormat && numericAttribute.HasReadNumber &&
-                numericAttribute.DisplayedValue == dec && numbers[0].HasReadNumber && numbers[0].DisplayedValue == dec,
-                $"{numericType} did not default to DEC");
-            numericAttribute.UseNumericHex = true;
-            numbers[0].UseNumericHex = true;
-            Check(numericAttribute.DisplayedValue == $"0x{hex}" && numbers[0].DisplayedValue == $"0x{hex}" &&
-                numbers[1].DisplayedValue == dec, $"{numericType} HEX lost its wire payload or affected a sibling");
+            var table = ProfileGenericTableBuilder.Build(DlmsValue.Array(),
+                DlmsValue.Array(DlmsValue.Structure(value, DlmsValue.Structure(value, value))), []);
+            var cells = table.Rows.Single().Cells;
+            Check(numericAttribute.HasReadNumber && numericAttribute.DisplayedValue == dec &&
+                numericAttribute.NumericHexValue == $"0x{hex}" &&
+                numbers.All(number => number.HasReadNumber && number.DisplayedValue == dec && number.NumericHexValue == $"0x{hex}") &&
+                cells[0].HasNumber && cells[0].Value == dec && cells[0].NumericHexValue == $"0x{hex}" &&
+                cells[1].Value.Contains(dec + Environment.NewLine) && cells[1].Value.Contains($"0x{hex}") &&
+                !cells[1].Value.Contains("DEC ") && !cells[1].Value.Contains("HEX "),
+                $"{numericType} did not separate decimal and complete HEX values without labels");
             numericAttribute.UseReadValue();
-            numericAttribute.UseNumericHex = false;
             Check(numericAttribute.WriteText == dec && numericAttribute.DisplayedValue == dec,
-                $"{numericType} display changed the value copied to the editor or did not restore DEC");
+                $"{numericType} display changed the value copied to the editor");
         }
 
         for (byte mode = 0; mode <= 6; mode++)
@@ -223,7 +329,7 @@ internal static class AttributeWriteChecks
             Check(MeterConnection.AllowsWrite(new AttributeAccess(2, (byte)mode, []), 3, ClientAuthentication.High) ==
                 (mode is 2 or 3), "v3 protected or readonly write allowed");
 
-        await using (var settings = new MainViewModel())
+        await using (var settings = new MainViewModel { Host = "localhost", TcpPort = "4059" })
         await using (var restored = new MainViewModel())
         {
             var option = settings.ConformanceOptions.Single(o => o.Flag == DlmsConformance.BlockTransferWithSet);
@@ -327,10 +433,10 @@ internal static class AttributeWriteChecks
                     attribute.WriteStatus.Contains("не выполнена") && attribute.LastReadValue?.AsUInt64() == 11,
                     "A failed preflight sent SET or discarded the last read");
             if (outcome == "cancel-before")
-                Check(vm.HasStatusError && channel.Gets == 0 && vm.IsConnected && attribute.WriteStatus.Contains("до отправки") &&
+                Check(!vm.HasStatusError && channel.Gets == 0 && vm.IsConnected && attribute.WriteStatus.Contains("до отправки") &&
                     attribute.LastReadValue?.AsUInt64() == 11, "Cancellation before sending was reported as an uncertain write");
             if (outcome == "ok")
-                Check(channel.Gets == 1 && attribute.Value == "78" && !vm.HasStatusError,
+                Check(channel.Gets == 1 && attribute.Value == $"78{Environment.NewLine}0x004E" && attribute.DisplayedValue == "78" && attribute.NumericHexValue == "0x004E" && !vm.HasStatusError,
                     "Write did not show the actual read-back value");
             if (outcome == "octet-text")
                 Check(channel.Gets == 1 && attribute.Value == "DF" && attribute.DisplayedValue == "Я" && !vm.HasStatusError,

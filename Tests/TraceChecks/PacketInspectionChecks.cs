@@ -159,7 +159,7 @@ internal static class PacketInspectionChecks
         byte[] scalerRequest = request.ToArray(); scalerRequest[11] = 3;
         var scaled = Analyze($"TX: {Hex(scalerRequest)}\nRX: C4 01 C1 00 02 02 0F FF 16 23\nTX: {Hex(request)}\nRX: {Hex(response)}");
         Check(scaled[^1].ValueText.StartsWith("230.1 В") && scaled[^1].DataValue?.AsInt64() == 2301, "scaler/unit from prior exchange");
-        Check(normal[1].ValueText == "2301", "units invented without scaler/unit");
+        Check(normal[1].ValueText == $"2301{Environment.NewLine}0x08FD", "numeric preview lost DEC/HEX or invented units without scaler/unit");
 
         var compactValue = new DlmsValue(DlmsType.CompactArray, new DlmsCompactArray(
             new(DlmsType.Structure, [CompactTypeDescription.Scalar(DlmsType.UInt16), CompactTypeDescription.Scalar(DlmsType.Int8)]),

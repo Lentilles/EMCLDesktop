@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:EMCLDesktop.Views"
+             xmlns:vm="using:EMCLDesktop.ViewModels"
+             x:Class="EMCLDesktop.Views.OctetStringField"
+             x:Name="Field" x:DataType="views:OctetStringField">
+    <Grid>
+        <TextBox x:Name="ValueBox" Text="{Binding Text, ElementName=Field, Mode=TwoWay}"
+                 IsReadOnly="{Binding IsReadOnly, ElementName=Field}"
+                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="42" MaxHeight="240"
+                 AutomationProperties.Name="Значение в выбранном формате"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <TextBox.InnerLeftContent>
+                <TextBlock Text="{Binding Format.Label, ElementName=Field}" FontWeight="SemiBold"
+                           Margin="10,8" VerticalAlignment="Top" />
+            </TextBox.InnerLeftContent>
+            <TextBox.InnerRightContent>
+                <Button x:Name="OpenFormatsButton" Content="▾" Click="OpenFormatsClick" Padding="10,8"
+                        VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0"
+                        AutomationProperties.Name="Выбрать формат значения"
+                        ToolTip.Tip="Форматы и значения" />
+            </TextBox.InnerRightContent>
+        </TextBox>
+        <Popup x:Name="FormatsPopup" PlacementTarget="{Binding #ValueBox}" Placement="Bottom"
+               IsLightDismissEnabled="True">
+            <Border Background="#172438" BorderBrush="#31435B" BorderThickness="1"
+                    CornerRadius="6" Padding="4" MinWidth="300" MaxWidth="600">
+                <ScrollViewer MaxHeight="360" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Previews, ElementName=Field}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:OctetStringPreview">
+                                <Button Click="ChooseFormatClick" HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch" Padding="10,8"
+                                        Background="Transparent" BorderThickness="0">
+                                    <Grid ColumnDefinitions="110,*" ColumnSpacing="8">
+                                        <TextBlock Text="{Binding Format.Label}" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

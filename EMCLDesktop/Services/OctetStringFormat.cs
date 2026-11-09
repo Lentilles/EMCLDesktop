@@ -17,9 +17,12 @@ public sealed class OctetStringFormat
     }
 
     public string Label { get; }
-    public bool CanParse => this != DlmsDateTime;
+    public bool CanParse => this != DlmsDateTime && this != DlmsDate && this != LocalDate;
     public static OctetStringFormat Hex { get; } = new("HEX");
     public static OctetStringFormat DlmsDateTime { get; } = new("DLMS date-time");
+    public static OctetStringFormat DlmsDate { get; } = new("YYYY-MM-DD");
+    public static OctetStringFormat LocalDate { get; } = new("DD.MM.YYYY");
+    public static IReadOnlyList<OctetStringFormat> DateReadOptions { get; } = [Hex, DlmsDate, LocalDate];
     public static IReadOnlyList<OctetStringFormat> Options { get; } =
     [
         Hex,
@@ -33,7 +36,7 @@ public sealed class OctetStringFormat
 
     public byte[] Parse(string text)
     {
-        if (!CanParse) throw new FormatException("DLMS date-time доступен для просмотра. Для ввода байтов используйте HEX.");
+        if (!CanParse) throw new FormatException($"{Label} доступен для просмотра. Для ввода байтов используйте HEX.");
         if (encoding is null) return ParseHex(text);
         try
         {
@@ -50,6 +53,7 @@ public sealed class OctetStringFormat
     public string? Format(ReadOnlySpan<byte> bytes)
     {
         if (this == DlmsDateTime) return FormatDateTime(bytes);
+        if (this == DlmsDate || this == LocalDate) return FormatDate(bytes, this == LocalDate);
         if (encoding is null) return Convert.ToHexString(bytes);
 
         try
@@ -61,6 +65,38 @@ public sealed class OctetStringFormat
         {
             return null;
         }
+    }
+
+    private static string? FormatDate(ReadOnlySpan<byte> bytes, bool local)
+    {
+        if (bytes.Length != DlmsValueSizes.Date) return null;
+
+        int year = (bytes[DateFields.YearHigh] << 8) | bytes[DateFields.YearLow];
+        byte month = bytes[DateFields.Month];
+        byte day = bytes[DateFields.Day];
+        byte weekday = bytes[DateFields.DayOfWeek];
+        if (month is not (>= 1 and <= 12 or >= 0xFD) || day is not (>= 1 and <= 31 or >= 0xFD) ||
+            weekday is not (>= 1 and <= 7 or DateFields.Unspecified)) return null;
+
+        // Use an equivalent Gregorian year to validate leap days without replacing DLMS fields.
+        int calendarYear = year == ushort.MaxValue ? 2000 : 2000 + year % 400;
+        if (month <= 12 && day <= 31 && day > DateTime.DaysInMonth(calendarYear, month)) return null;
+
+        string yearText = year == ushort.MaxValue ? "****" : year.ToString("D4", CultureInfo.InvariantCulture);
+        string monthText = month switch
+        {
+            0xFD => "[конец летнего времени]",
+            0xFE => "[начало летнего времени]",
+            _ => DateTimeField(month)
+        };
+        string dayText = day switch
+        {
+            0xFD => "[предпоследний день]",
+            0xFE => "[последний день]",
+            _ => DateTimeField(day)
+        };
+        string date = local ? $"{dayText}.{monthText}.{yearText}" : $"{yearText}-{monthText}-{dayText}";
+        return weekday == DateFields.Unspecified ? date : $"{date} · {weekdays[weekday - 1]}";
     }
 
     private static string? FormatDateTime(ReadOnlySpan<byte> bytes)

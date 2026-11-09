@@ -50,6 +50,7 @@ internal static class SavedConfiguration
                     item.HasDeclaredType ? item.Type : null, item.Access ?? "Не указан", item.CanRead)
                 {
                     Type = item.Type ?? "Тип не указан",
+                    WriteType = DlmsTypeText.Parse(item.Type),
                     Value = item.Value ?? "Не считано"
                 };
                 obj.Attributes.Add(attribute);

@@ -49,6 +49,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         [StopBits.One, StopBits.OnePointFive, StopBits.Two];
     public IReadOnlyList<Handshake> SerialHandshakes { get; } = Enum.GetValues<Handshake>();
     public IReadOnlyList<string> Framings { get; } = ["Wrapper", "HDLC"];
+    public IReadOnlyList<int> HdlcRetryCounts { get; } = [0, 1];
     public IReadOnlyList<string> Authentications { get; } = ["None", "Low", "High"];
     public IReadOnlyList<string> PasswordFormats { get; } = ["UTF-8", "Hex", "Environment"];
     public IReadOnlyList<string> TraceFormats { get; } =
@@ -78,13 +79,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial Handshake SerialHandshake { get; set; } = Handshake.None;
     [ObservableProperty] public partial bool SerialDtrEnable { get; set; }
     [ObservableProperty] public partial bool SerialRtsEnable { get; set; }
-    [ObservableProperty] public partial string Host { get; set; } = "10.10.42.217";
-    [ObservableProperty] public partial string TcpPort { get; set; } = "90";
+    [ObservableProperty] public partial string Host { get; set; } = "";
+    [ObservableProperty] public partial string TcpPort { get; set; } = "";
     [ObservableProperty] public partial string Framing { get; set; } = "HDLC";
     [ObservableProperty] public partial string ClientAddress { get; set; } = "48";
     [ObservableProperty] public partial string ServerAddress { get; set; } = "1";
     [ObservableProperty] public partial string ServerPhysicalAddress { get; set; } = "17";
     [ObservableProperty] public partial bool ExtendedHdlcAddress { get; set; }
+    [ObservableProperty] public partial int HdlcInformationFrameRetryCount { get; set; }
+    [ObservableProperty] public partial string HdlcAcknowledgementTimeoutSeconds { get; set; } =
+        MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
     [ObservableProperty] public partial string AssociationVersion { get; set; } = "1";
     [ObservableProperty] public partial string AssociationObis { get; set; } = "0.0.40.0.0.255";
     [ObservableProperty] public partial string Authentication { get; set; } = "High";
@@ -311,7 +315,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         IsTreeReadInProgress = true;
         return new Progress<ObjectListProgress>(value =>
         {
-            if (!IsTreeReadInProgress || version != treeReadVersion) return;
+            if (!IsTreeReadInProgress || version != treeReadVersion || OperationToken.IsCancellationRequested) return;
             TreeReadCurrent = value.Current;
             TreeReadTotal = value.Total;
             TreeReadProgressText = $"Считано записей дерева: {value.Current} из {value.Total}";
@@ -329,10 +333,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public async Task LoadConfigurationAsync(Stream stream)
     {
         if (IsBusy || IsReading) return;
+        using var operation = BeginOperation("загрузка конфигурации");
         IsBusy = true;
         try
         {
-            using var document = await JsonDocument.ParseAsync(stream);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: operation.Token);
             var root = document.RootElement;
             if (root.TryGetProperty("format", out var format) &&
                 format.GetString() is not (SavedConfiguration.Format or SavedConfiguration.LegacyFormat))
@@ -396,6 +401,17 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 legacy ? "hdlcServerPhysicalAddress" : "serverPhysicalAddress")?.ToString(CultureInfo.InvariantCulture) ?? "";
             bool importedExtended = GetBool(framingSettings,
                 legacy ? "hdlcExtendedAddress" : "extendedAddress", false);
+            double importedIdleTimeout = GetDouble(association, "requestTimeoutSeconds", 30);
+            int importedHdlcRetryCount = 0;
+            double importedHdlcAcknowledgementTimeout = MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds;
+            if (importedFraming == "HDLC")
+            {
+                importedHdlcRetryCount = GetInt(framingSettings, "informationFrameRetryCount", 0);
+                importedHdlcAcknowledgementTimeout = GetDouble(framingSettings, "acknowledgementTimeoutSeconds",
+                    MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds);
+                MeterConnectionOptions.ValidateHdlcRecovery(importedHdlcRetryCount,
+                    importedHdlcAcknowledgementTimeout, importedIdleTimeout);
+            }
             var importedLimits = root.TryGetProperty("limits", out var limitSettings)
                 ? new ProtocolLimits
                 {
@@ -426,8 +442,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 importedPasswordFormat = "Environment";
             }
 
+            operation.Token.ThrowIfCancellationRequested();
             IsConnected = false;
-            await CloseConnectionAsync();
+            await CloseConnectionAsync(operation.Token);
+            operation.Token.ThrowIfCancellationRequested();
             ++selectionVersion;
             SelectedObject = null;
             Objects.Clear();
@@ -455,6 +473,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             ServerAddress = importedServer;
             ServerPhysicalAddress = importedPhysical;
             ExtendedHdlcAddress = importedExtended;
+            HdlcInformationFrameRetryCount = importedHdlcRetryCount;
+            HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
             AssociationVersion = association.GetProperty("version").GetByte().ToString(CultureInfo.InvariantCulture);
             AssociationObis = association.GetProperty("logicalName").GetString() ?? "";
             Authentication = GetString(association, "authentication", "None");
@@ -462,8 +482,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             PasswordFormat = importedPasswordFormat;
             ConnectTimeoutSeconds = GetDouble(connectionSettings, "connectTimeoutSeconds", 10)
                 .ToString(CultureInfo.InvariantCulture);
-            IdleTimeoutSeconds = GetDouble(association, "requestTimeoutSeconds", 30)
-                .ToString(CultureInfo.InvariantCulture);
+            IdleTimeoutSeconds = importedIdleTimeout.ToString(CultureInfo.InvariantCulture);
             KeepAliveIntervalSeconds = GetDouble(association, "keepAliveIntervalSeconds", 20)
                 .ToString(CultureInfo.InvariantCulture);
             MaxReceivePduSize = GetInt(association, "maxReceivePduSize", 65535)
@@ -483,6 +502,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 Status = "Настройки загружены из JSON. Проверьте поля и подключитесь.";
             }
         }
+        catch (Exception) when (operation.IsCancellationRequested)
+        {
+            Status = "Загрузка конфигурации отменена.";
+        }
         catch (Exception error)
         {
             ReportError($"Не удалось загрузить конфигурацию: {error.Message}");
@@ -498,70 +521,82 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (IsBusy || IsReading)
             throw new InvalidOperationException("Дождитесь завершения текущей операции.");
         var options = ParseOptions();
-        var snapshot = new
+        using var operation = BeginOperation("сохранение конфигурации");
+        IsBusy = true;
+        try
         {
-            format = SavedConfiguration.Format,
-            schemaVersion = SavedConfiguration.Version,
-            channel = new
+            var snapshot = new
             {
-                connection = options.Transport == "Serial"
-                    ? (object)new
-                    {
-                        kind = "Serial",
-                        portName = options.Serial!.PortName,
-                        baudRate = options.Serial.BaudRate,
-                        dataBits = options.Serial.DataBits,
-                        parity = options.Serial.Parity.ToString(),
-                        stopBits = options.Serial.StopBits.ToString(),
-                        handshake = options.Serial.Handshake.ToString(),
-                        dtrEnable = options.Serial.DtrEnable,
-                        rtsEnable = options.Serial.RtsEnable,
-                        connectTimeoutSeconds = options.ConnectTimeoutSeconds
-                    }
-                    : new
-                    {
-                        kind = "Tcp",
-                        host = options.Host,
-                        tcpPort = options.TcpPort,
-                        connectTimeoutSeconds = options.ConnectTimeoutSeconds
-                    },
-                framing = new
+                format = SavedConfiguration.Format,
+                schemaVersion = SavedConfiguration.Version,
+                channel = new
                 {
-                    kind = options.Framing == "HDLC" ? "Hdlc" : "Wrapper",
-                    clientAddress = options.ClientAddress,
-                    serverLogicalAddress = options.ServerAddress,
-                    serverPhysicalAddress = options.ServerPhysicalAddress,
-                    extendedAddress = options.ExtendedHdlcAddress,
-                    clientPort = options.ClientAddress,
-                    serverPort = options.ServerAddress
-                }
-            },
-            association = new
-            {
-                version = options.AssociationVersion,
-                logicalName = options.AssociationObis,
-                authentication = options.Authentication.ToString(),
-                password = options.PasswordFormat == "UTF-8" ? options.Password : null,
-                passwordHex = options.PasswordFormat == "Hex" ? options.Password : null,
-                passwordEnvironmentVariable = options.PasswordFormat == "Environment" ? options.Password : null,
-                conformance = options.Conformance.ToString(),
-                requestTimeoutSeconds = options.RequestTimeoutSeconds,
-                keepAliveIntervalSeconds = options.KeepAliveIntervalSeconds,
-                maxReceivePduSize = options.MaxReceivePduSize,
-                ignoreIdenticalObjectListEntries = options.IgnoreIdenticalObjectListEntries
-            },
-            limits = new
-            {
-                maxMessageBytes = options.Limits.MaxMessageBytes,
-                maxDepth = options.Limits.MaxDepth,
-                maxCollectionItems = options.Limits.MaxCollectionItems,
-                maxBlockCount = options.Limits.MaxBlockCount
-            },
-            catalog = SavedConfiguration.CaptureCatalog(Objects)
-        };
-        await JsonSerializer.SerializeAsync(stream, snapshot, SavedConfiguration.JsonOptions);
-        await stream.FlushAsync();
-        Status = $"Конфигурация и каталог ({Objects.Count} объектов) сохранены в JSON.";
+                    connection = options.Transport == "Serial"
+                        ? (object)new
+                        {
+                            kind = "Serial",
+                            portName = options.Serial!.PortName,
+                            baudRate = options.Serial.BaudRate,
+                            dataBits = options.Serial.DataBits,
+                            parity = options.Serial.Parity.ToString(),
+                            stopBits = options.Serial.StopBits.ToString(),
+                            handshake = options.Serial.Handshake.ToString(),
+                            dtrEnable = options.Serial.DtrEnable,
+                            rtsEnable = options.Serial.RtsEnable,
+                            connectTimeoutSeconds = options.ConnectTimeoutSeconds
+                        }
+                        : new
+                        {
+                            kind = "Tcp",
+                            host = options.Host,
+                            tcpPort = options.TcpPort,
+                            connectTimeoutSeconds = options.ConnectTimeoutSeconds
+                        },
+                    framing = new
+                    {
+                        kind = options.Framing == "HDLC" ? "Hdlc" : "Wrapper",
+                        clientAddress = options.ClientAddress,
+                        serverLogicalAddress = options.ServerAddress,
+                        serverPhysicalAddress = options.ServerPhysicalAddress,
+                        extendedAddress = options.ExtendedHdlcAddress,
+                        informationFrameRetryCount = options.Framing == "HDLC" ? (int?)options.HdlcInformationFrameRetryCount : null,
+                        acknowledgementTimeoutSeconds = options.Framing == "HDLC" ? (double?)options.HdlcAcknowledgementTimeoutSeconds : null,
+                        clientPort = options.ClientAddress,
+                        serverPort = options.ServerAddress
+                    }
+                },
+                association = new
+                {
+                    version = options.AssociationVersion,
+                    logicalName = options.AssociationObis,
+                    authentication = options.Authentication.ToString(),
+                    password = options.PasswordFormat == "UTF-8" ? options.Password : null,
+                    passwordHex = options.PasswordFormat == "Hex" ? options.Password : null,
+                    passwordEnvironmentVariable = options.PasswordFormat == "Environment" ? options.Password : null,
+                    conformance = options.Conformance.ToString(),
+                    requestTimeoutSeconds = options.RequestTimeoutSeconds,
+                    keepAliveIntervalSeconds = options.KeepAliveIntervalSeconds,
+                    maxReceivePduSize = options.MaxReceivePduSize,
+                    ignoreIdenticalObjectListEntries = options.IgnoreIdenticalObjectListEntries
+                },
+                limits = new
+                {
+                    maxMessageBytes = options.Limits.MaxMessageBytes,
+                    maxDepth = options.Limits.MaxDepth,
+                    maxCollectionItems = options.Limits.MaxCollectionItems,
+                    maxBlockCount = options.Limits.MaxBlockCount
+                },
+                catalog = SavedConfiguration.CaptureCatalog(Objects)
+            };
+            await JsonSerializer.SerializeAsync(stream, snapshot, SavedConfiguration.JsonOptions, operation.Token);
+            await stream.FlushAsync(operation.Token);
+            Status = $"Конфигурация и каталог ({Objects.Count} объектов) сохранены в JSON.";
+        }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        {
+            Status = "Сохранение конфигурации отменено. Файл может быть неполным.";
+        }
+        finally { IsBusy = false; }
     }
 
     private static string GetString(JsonElement element, string name, string fallback) =>
@@ -699,20 +734,18 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private void CancelConnection()
     {
         if (!CanCancelConnection()) return;
-        connectionCancellation?.Cancel();
-        OnPropertyChanged(nameof(ConnectionState));
-        CancelConnectionCommand.NotifyCanExecuteChanged();
+        CancelOperation();
     }
 
     [RelayCommand]
     private async Task ConnectAsync()
     {
         if (Volatile.Read(ref disposed) != 0 || IsBusy || IsReading) return;
-        using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
-        var cancellationToken = attemptCancellation.Token;
+        using var operation = BeginOperation("подключение");
+        var cancellationToken = operation.Token;
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         connecting = finished;
-        connectionCancellation = attemptCancellation;
+        connectionCancellation = operation.Source;
         IsBusy = true;
         IsConnecting = true;
         Status = "Подключение к счётчику…";
@@ -723,7 +756,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             try
             {
-                await CloseConnectionAsync();
+                await CloseConnectionAsync(operation.Token);
             }
             catch (Exception)
             {
@@ -741,6 +774,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                       $"аутентификация={attemptedOptions.Authentication}, " +
                       $"Conformance={attemptedOptions.Conformance}, " +
                       $"Max PDU={attemptedOptions.MaxReceivePduSize}; пароль скрыт");
+            if (attemptedOptions.Framing == "HDLC")
+                trace.Add($"HDLC: повторы I-кадров={attemptedOptions.HdlcInformationFrameRetryCount}, " +
+                          $"таймаут подтверждения={attemptedOptions.HdlcAcknowledgementTimeoutSeconds:g} с");
             if (attemptedOptions.Serial is { } serial)
                 trace.Add($"Serial: BaudRate={serial.BaudRate}, DataBits={serial.DataBits}, " +
                           $"Parity={serial.Parity}, StopBits={serial.StopBits}, Handshake={serial.Handshake}, " +
@@ -821,13 +857,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private async Task DisconnectAsync()
     {
         if (IsBusy || IsReading) return;
+        using var operation = BeginOperation("отключение");
         IsBusy = true;
         IsDisconnecting = true;
         ++selectionVersion;
         IsConnected = false;
         try
         {
-            await CloseConnectionAsync();
+            await CloseConnectionAsync(operation.Token);
             Status = $"Отключено. Каталог ({Objects.Count} объектов) доступен для просмотра и сохранения.";
         }
         catch (Exception error)
@@ -853,17 +890,23 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             ReportError("Нет активного соединения. Подключитесь к счётчику повторно.");
             return;
         }
+        using var operation = BeginOperation("чтение дерева");
         IsBusy = true;
         Status = "Чтение дерева объектов…";
         try
         {
-            await meter.RefreshCatalogAsync(StartTreeReadProgress(), shutdown.Token);
+            await meter.RefreshCatalogAsync(StartTreeReadProgress(), operation.Token);
+            operation.Token.ThrowIfCancellationRequested();
             ++selectionVersion;
             PopulateObjects(meter);
             SelectedTabIndex = ObjectsTabIndex;
             Status = $"Дерево обновлено: {Objects.Count} объектов" +
                 (meter.SkippedDuplicateEntries > 0
                     ? $"; пропущено одинаковых записей: {meter.SkippedDuplicateEntries}" : "") + ".";
+        }
+        catch (Exception) when (operation.IsCancellationRequested)
+        {
+            await ReportCancellationAsync(meter, "Чтение дерева отменено.");
         }
         catch (Exception error)
         {
@@ -912,6 +955,15 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             !double.TryParse(KeepAliveIntervalSeconds, NumberStyles.Float,
                 CultureInfo.InvariantCulture, out double keepAliveInterval))
             throw new ArgumentException("Таймауты должны быть числами в секундах.");
+        double hdlcAcknowledgementTimeout = MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds;
+        if (IsHdlc)
+        {
+            if (!double.TryParse(HdlcAcknowledgementTimeoutSeconds, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out hdlcAcknowledgementTimeout))
+                throw new ArgumentException("Укажите таймаут подтверждения HDLC в секундах.");
+            MeterConnectionOptions.ValidateHdlcRecovery(HdlcInformationFrameRetryCount,
+                hdlcAcknowledgementTimeout, idleTimeout);
+        }
         if (!ushort.TryParse(MaxReceivePduSize, NumberStyles.None,
                 CultureInfo.InvariantCulture, out ushort maxPdu))
             throw new ArgumentException("Максимальный PDU должен быть числом от 0 до 65535.");
@@ -921,12 +973,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             version,
             AssociationObis.Trim(), auth, Password, PasswordFormat,
             connectTimeout, idleTimeout, keepAliveInterval, maxPdu, conformance,
-            IgnoreIdenticalObjectListEntries, limits, Transport, serial);
+            IgnoreIdenticalObjectListEntries, limits, Transport, serial)
+        {
+            HdlcInformationFrameRetryCount = IsHdlc ? HdlcInformationFrameRetryCount : 0,
+            HdlcAcknowledgementTimeoutSeconds = hdlcAcknowledgementTimeout
+        };
         _ = options.CreateTransportFactory();
         return options;
     }
 
-    private async Task CloseConnectionAsync()
+    private async Task CloseConnectionAsync(CancellationToken cancellationToken = default)
     {
         var oldConnection = connection;
         connection = null;
@@ -934,7 +990,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             oldConnection.KeepAliveFailed -= OnKeepAliveFailed;
             closingConnectionTask = Task.WhenAll(closingConnectionTask,
-                oldConnection.DisposeAsync().AsTask());
+                oldConnection.DisposeAsync(cancellationToken).AsTask());
         }
 
         var pending = closingConnectionTask;
@@ -983,6 +1039,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     {
         var imported = meter.Association
             ?? throw new InvalidOperationException("Дерево объектов ещё не считано.");
+        var previousObjects = Objects.ToDictionary(obj => (obj.LogicalName, obj.ClassId, obj.ClassVersion));
         var rows = new List<MeterObjectViewModel>();
         foreach (var obj in imported.Catalog.Objects.OrderBy(item => item.LogicalName.Value))
         {
@@ -990,6 +1047,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             var rights = imported.Access.Rights[obj.LogicalName];
             var row = new MeterObjectViewModel(obj.LogicalName, descriptor.Key.ClassId,
                 descriptor.Key.ClassVersion, descriptor.IsKnown ? descriptor.Name : null);
+            previousObjects.TryGetValue((obj.LogicalName, row.ClassId, row.ClassVersion), out var previous);
             var definedAttributes = descriptor.IsKnown
                 ? descriptor.Attributes.ToDictionary(item => item.Index)
                 : [];
@@ -1003,6 +1061,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     DlmsDisplay.AttributeAccess(access, imported.Access.AssociationVersion), meter.CanRead(access));
                 if (index == CosemObject.LogicalNameAttributeIndex && !attribute.HasDeclaredType)
                     attribute.Type = "OctetString (9)";
+                if (!attribute.HasDeclaredType && previous?.Attributes.FirstOrDefault(item =>
+                        item.Index == index && !item.HasDeclaredType) is { } previousAttribute &&
+                    DlmsTypeText.Parse(previousAttribute.Type) is { } observedType)
+                {
+                    attribute.Type = DlmsTypeText.Format(observedType);
+                    attribute.WriteType = observedType;
+                }
                 row.Attributes.Add(attribute);
             }
             var definedMethods = descriptor.IsKnown
@@ -1077,12 +1142,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
 
         int version = selectionVersion;
+        using var operation = BeginOperation("запись атрибута");
         IsBusy = true;
         attribute.WriteStatus = "Запись…";
         Status = $"Запись {obj.Obis}: атрибут {attribute.Index}…";
         try
         {
-            await meter!.WriteAsync(obj.ClassId, obj.LogicalName, attribute.Index, value, shutdown.Token);
+            await meter!.WriteAsync(obj.ClassId, obj.LogicalName, attribute.Index, value, operation.Token);
             if (version != selectionVersion || meter != connection) return;
             attribute.ForgetReadValue();
             attribute.Value = "Запись подтверждена. Фактическое значение не считано.";
@@ -1093,10 +1159,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 try
                 {
                     var actual = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
-                        attribute.Index, cancellationToken: shutdown.Token);
+                        attribute.Index, cancellationToken: operation.Token);
                     if (version != selectionVersion || meter != connection) return;
                     ApplyReadResult(obj, attribute, actual);
                     attribute.WriteStatus = "Запись подтверждена. Значение перечитано со счётчика.";
+                }
+                catch (Exception) when (operation.IsCancellationRequested)
+                {
+                    attribute.WriteStatus = "Запись подтверждена. Перечитывание отменено.";
+                    await ReportCancellationAsync(meter, $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
+                    return;
                 }
                 catch (Exception error)
                 {
@@ -1125,10 +1197,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 ArgumentException or InvalidOperationException or NotSupportedException => $"Запись не выполнена: {error.Message}",
                 _ => $"Запись не подтверждена: {error.Message}. Проверьте значение чтением перед повторной записью."
             };
-            ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
+            if (operation.IsCancellationRequested && error is OperationCanceledException)
+                await ReportCancellationAsync(meter, $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
+            else ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
         }
         finally
         {
+            if (operation.IsCancellationRequested) await CloseCancelledConnectionAsync(meter);
             if (meter == connection && meter?.IsActive != true) IsConnected = false;
             IsBusy = false;
         }
@@ -1177,12 +1252,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             }
         }
 
+        using var operation = BeginOperation("вызов метода");
         IsBusy = true;
         method.InvokeStatus = "Вызов…";
         Status = $"Вызов {target}…";
         try
         {
-            var result = await meter.InvokeAsync(obj.ClassId, obj.LogicalName, method.Index, parameter, shutdown.Token);
+            var result = await meter.InvokeAsync(obj.ClassId, obj.LogicalName, method.Index, parameter, operation.Token);
             InvalidateAfterInvoke(obj);
             method.InvokeStatus = result is null ? "Вызов подтверждён. Счётчик не вернул значение."
                 : $"Вызов подтверждён. Возвращённое значение ({result.Type}):\n{DlmsDisplay.Value(result)}";
@@ -1211,10 +1287,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 InvalidateAfterInvoke(obj);
                 method.InvokeStatus = $"Исход вызова не подтверждён: {error.Message}. Проверьте состояние счётчика перед повторным вызовом.";
             }
-            ReportError($"{target}. {method.InvokeStatus}");
+            if (operation.IsCancellationRequested && meter.IsActive && error is OperationCanceledException)
+            {
+                method.InvokeStatus = "Вызов отменён до отправки запроса.";
+                await ReportCancellationAsync(meter, $"{target}. {method.InvokeStatus}");
+            }
+            else ReportError($"{target}. {method.InvokeStatus}");
         }
         finally
         {
+            if (operation.IsCancellationRequested) await CloseCancelledConnectionAsync(meter);
             if (meter == connection && !meter.IsActive) IsConnected = false;
             IsBusy = false;
         }
@@ -1249,6 +1331,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
 
         int version = selectionVersion;
+        using var operation = BeginOperation("чтение профиля");
         var bufferAttribute = obj.Attributes.FirstOrDefault(attribute =>
             attribute.Index == ProfileGenericMembers.Attributes.Buffer);
         obj.ProfileTable = null;
@@ -1278,7 +1361,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     uint requested = ParsePositiveEntry(obj.ProfileCountText, "Количество записей");
                     Status = $"{obj.Obis}: чтение entries_in_use…";
                     var entries = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
-                        ProfileGenericMembers.Attributes.EntriesInUse, cancellationToken: shutdown.Token);
+                        ProfileGenericMembers.Attributes.EntriesInUse, cancellationToken: operation.Token);
                     if (version != selectionVersion || meter != connection) return;
                     var entriesAttribute = obj.Attributes.FirstOrDefault(attribute =>
                         attribute.Index == ProfileGenericMembers.Attributes.EntriesInUse);
@@ -1317,6 +1400,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 ReportError(summary);
             else Status = summary;
         }
+        catch (Exception) when (operation.IsCancellationRequested)
+        {
+            obj.ProfileTableStatus = "Чтение профиля отменено.";
+            await ReportCancellationAsync(meter, $"{obj.Obis}: {obj.ProfileTableStatus}");
+        }
         catch (Exception error)
         {
             if (version == selectionVersion)
@@ -1333,7 +1421,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         finally
         {
             IsReading = false;
-            if (meter == connection && !meter.IsActive)
+            if (!operation.IsCancellationRequested && meter == connection && !meter.IsActive)
             {
                 IsConnected = false;
                 ReportError("Соединение потеряно. Подключитесь повторно.");
@@ -1348,12 +1436,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ProfileReadProgress = default(ProfileBufferProgress);
         var progress = new Progress<ProfileBufferProgress>(value =>
         {
-            if (progressVersion == profileReadVersion && version == selectionVersion && meter == connection)
+            if (progressVersion == profileReadVersion && version == selectionVersion && meter == connection &&
+                !OperationToken.IsCancellationRequested)
                 ProfileReadProgress = value;
         });
         try
         {
-            var result = await meter.ReadProfileBufferAsync(obj.LogicalName, selection, progress, shutdown.Token);
+            var result = await meter.ReadProfileBufferAsync(obj.LogicalName, selection, progress, OperationToken);
+            OperationToken.ThrowIfCancellationRequested();
             if (version != selectionVersion || meter != connection) return false;
 
             var buffer = new DlmsValue(DlmsType.Array, result.Rows);
@@ -1370,6 +1460,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             obj.ProfileBuffer = buffer;
             UpdateProfileTable(obj);
             return true;
+        }
+        catch (Exception) when (OperationToken.IsCancellationRequested)
+        {
+            obj.ProfileTableStatus = "Чтение профиля отменено.";
+            throw;
         }
         finally
         {
@@ -1388,7 +1483,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private async Task ReadAttributesAsync(MeterObjectViewModel obj, AttributeViewModel[] attributes)
     {
         var meter = connection;
-        if (IsReading) return;
+        if (IsReading || IsBusy) return;
         if (meter?.IsActive != true)
         {
             IsConnected = false;
@@ -1397,11 +1492,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         int version = selectionVersion;
         int readCount = 0;
+        using var operation = BeginOperation("чтение атрибутов");
         IsReading = true;
         try
         {
             foreach (var attribute in attributes)
             {
+                operation.Token.ThrowIfCancellationRequested();
                 if (version != selectionVersion || meter != connection || !meter.IsActive) break;
                 if (obj.IsProfileGeneric && attribute.Index == ProfileGenericMembers.Attributes.Buffer &&
                     obj.ProfileCaptureObjects == null)
@@ -1420,15 +1517,20 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     readCount++;
             }
         }
+        catch (Exception) when (operation.IsCancellationRequested)
+        {
+            await ReportCancellationAsync(meter,
+                $"{obj.Obis}: чтение отменено. Считано атрибутов {readCount} из {attributes.Length}.");
+        }
         finally
         {
             IsReading = false;
-            if (meter == connection && !meter.IsActive)
+            if (!operation.IsCancellationRequested && meter == connection && !meter.IsActive)
             {
                 IsConnected = false;
                 ReportError("Соединение потеряно. Подключитесь повторно.");
             }
-            else if (version == selectionVersion)
+            else if (!operation.IsCancellationRequested && version == selectionVersion)
             {
                 string summary = $"{obj.Obis}: считано атрибутов {readCount} из {attributes.Length}.";
                 if (readCount == attributes.Length) Status = summary;
@@ -1440,6 +1542,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private async Task<bool> ReadAttributeCoreAsync(MeterObjectViewModel obj,
         AttributeViewModel attribute, MeterConnection meter, int version)
     {
+        OperationToken.ThrowIfCancellationRequested();
         if (attribute.Index == CosemObject.LogicalNameAttributeIndex)
         {
             attribute.Value = obj.Obis;
@@ -1459,11 +1562,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 return await ReadProfileBufferAsync(obj, attribute, meter, version);
 
             var result = await meter.ReadAsync(obj.ClassId, obj.LogicalName, attribute.Index,
-                cancellationToken: shutdown.Token);
+                cancellationToken: OperationToken);
+            OperationToken.ThrowIfCancellationRequested();
             if (version != selectionVersion || meter != connection) return false;
             ApplyReadResult(obj, attribute, result);
             return true;
         }
+        catch (Exception) when (OperationToken.IsCancellationRequested) { throw; }
         catch (Exception error)
         {
             if (version == selectionVersion && meter == connection)
@@ -1553,9 +1658,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         Inspector.Dispose();
         trace.Changed -= OnTraceChanged;
+        var pendingOperation = activeOperation?.Completion.Task;
         shutdown.Cancel();
         try
         {
+            if (pendingOperation is not null) await pendingOperation;
             if (connecting is { } pending) await pending.Task;
             ++selectionVersion;
             await CloseConnectionAsync();

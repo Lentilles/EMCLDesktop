@@ -43,7 +43,9 @@ public static class ProfileGenericTableBuilder
                   ?? $"Атрибут {capture.AttributeIndex}";
             if (capture.DataIndex != 0)
                 name += $" · элемент {capture.DataIndex}";
-            columns[index] = new(capture.LogicalName.ToString(), name);
+            columns[index] = new(capture.LogicalName.ToString(), name,
+                capture is { ClassId: CosemClassIds.Clock, AttributeIndex: 2 }
+                    ? OctetStringFormat.DlmsDateTime : OctetStringFormat.Hex);
         }
 
         var tableRows = new ProfileRowViewModel[rows.Length];
@@ -53,21 +55,19 @@ public static class ProfileGenericTableBuilder
             var cells = new ProfileCellViewModel[width];
             for (int columnIndex = 0; columnIndex < width; columnIndex++)
             {
-                string text = columnIndex >= fields.Length
-                    ? "—"
-                    : DisplayCell(fields[columnIndex], columnIndex < captures.Length ? captures[columnIndex] : null);
-                cells[columnIndex] = new(text);
+                cells[columnIndex] = columnIndex >= fields.Length ? new("—")
+                    : fields[columnIndex].Type == DlmsType.OctetString || DlmsDisplay.IsNumeric(fields[columnIndex].Type)
+                        ? new(fields[columnIndex], columns[columnIndex])
+                        : new(DisplayCell(fields[columnIndex]));
             }
             tableRows[rowIndex] = new(rowIndex + 1, cells);
         }
         return new(columns, tableRows);
     }
 
-    private static string DisplayCell(DlmsValue value, CaptureObject? capture)
+    private static string DisplayCell(DlmsValue value)
     {
-        if (value.Type == DlmsType.DateTime ||
-            capture is { ClassId: CosemClassIds.Clock, AttributeIndex: 2 } &&
-            value.Type == DlmsType.OctetString && value.Bytes.Length == 12)
+        if (value.Type == DlmsType.DateTime)
         {
             try
             {

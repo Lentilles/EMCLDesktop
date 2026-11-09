@@ -169,6 +169,22 @@
                             <TextBox Text="{Binding MaxReceivePduSize}" />
                         </StackPanel>
                     </Grid>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12" IsVisible="{Binding IsHdlc}">
+                        <StackPanel Grid.Column="0" Spacing="5">
+                            <TextBlock Text="Повторы неподтверждённых кадров HDLC"
+                                       Classes="field-label" TextWrapping="Wrap" />
+                            <ComboBox ItemsSource="{Binding HdlcRetryCounts}"
+                                      SelectedItem="{Binding HdlcInformationFrameRetryCount}"
+                                      ToolTip.Tip="0 отключает повторы. При 1 приложение проверяет подтверждение через RR."
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="Таймаут подтверждения HDLC, с"
+                                       Classes="field-label" TextWrapping="Wrap" />
+                            <TextBox Text="{Binding HdlcAcknowledgementTimeoutSeconds}"
+                                     ToolTip.Tip="При включённом повторе таймаут «Без обмена» должен быть больше трёх таймаутов подтверждения." />
+                        </StackPanel>
+                    </Grid>
                     <StackPanel Spacing="5">
                         <TextBlock Text="KeepAlive каждые, с" Classes="field-label" />
                         <TextBox Text="{Binding KeepAliveIntervalSeconds}" Width="140"

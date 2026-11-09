@@ -15,7 +15,7 @@
     <PackageVersion Include="Avalonia.Android" Version="12.1.5" />
     <PackageVersion Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageVersion Include="EMCL" Version="0.2.0" />
+    <PackageVersion Include="EMCL" Version="0.2.2" />
     <PackageVersion Include="Xamarin.AndroidX.Core.SplashScreen" Version="1.2.0.3" />
   </ItemGroup>
 </Project>

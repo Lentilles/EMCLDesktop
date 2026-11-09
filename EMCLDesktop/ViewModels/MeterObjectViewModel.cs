@@ -79,6 +79,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     string access, bool canRead) : DlmsValuePreviewViewModel
 {
     private bool hasOpenedWriteEditor;
+    private IReadOnlyList<OctetStringPreview>? writeOctetPreviews;
 
     public sbyte Index { get; } = index;
     public string Name { get; } = name ?? "Неизвестный атрибут";
@@ -94,11 +95,22 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [NotifyPropertyChangedFor(nameof(WriteHint))]
     public partial OctetStringFormat WriteOctetFormat { get; private set; } = OctetStringFormat.Hex;
     public IReadOnlyList<OctetStringFormat> WriteOctetFormats => OctetStringFormat.Options;
+    public IReadOnlyList<OctetStringPreview> WriteOctetPreviews
+    {
+        get
+        {
+            if (writeOctetPreviews is null)
+            {
+                writeOctetPreviews = WriteOctetFormats.Select(format => new OctetStringPreview(format, null)).ToArray();
+                RefreshWriteOctetPreviews();
+            }
+            return writeOctetPreviews;
+        }
+    }
     public IReadOnlyList<DlmsType> WriteTypes => DlmsValueEditor.Types;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WriteHint), nameof(IsWritingOctets))]
-    public partial DlmsType? WriteType { get; set; } =
-        Enum.TryParse<DlmsType>(type, out var declaredType) ? declaredType : null;
+    public partial DlmsType? WriteType { get; set; } = DlmsTypeText.Parse(type);
     [ObservableProperty] public partial string WriteText { get; set; } = "";
     [ObservableProperty] public partial string WriteStatus { get; set; } = "";
     [ObservableProperty]
@@ -110,7 +122,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [ObservableProperty] public partial string? WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
     [ObservableProperty] public partial bool CanUseReadValue { get; set; }
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(HasReadNumber), nameof(CanChooseReadFormat), nameof(DisplayedValue))]
+    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(HasReadFormats), nameof(HasReadNumber), nameof(DisplayedValue), nameof(NumericHexValue))]
     public partial DlmsValue? LastReadValue { get; private set; }
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasReadValueTree), nameof(ShowReadValueTree))]
@@ -134,7 +146,22 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     };
 
     partial void OnWriteTypeChanged(DlmsType? value) => WriteStatus = "";
-    partial void OnWriteTextChanged(string value) => WriteStatus = "";
+    partial void OnWriteTextChanged(string value)
+    {
+        WriteStatus = "";
+        RefreshWriteOctetPreviews();
+    }
+    partial void OnWriteOctetFormatChanged(OctetStringFormat value) => RefreshWriteOctetPreviews();
+    partial void OnLastReadValueChanged(DlmsValue? value) => RefreshOctetPreviews(value);
+
+    private void RefreshWriteOctetPreviews()
+    {
+        if (writeOctetPreviews is null) return;
+        DlmsValue? value;
+        try { value = DlmsValue.Octets(WriteOctetFormat.Parse(WriteText)); }
+        catch (FormatException) { value = null; }
+        foreach (var preview in writeOctetPreviews) preview.UpdateValue(value);
+    }
 
     public void ToggleWriteEditor()
     {

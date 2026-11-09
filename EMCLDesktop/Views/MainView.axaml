@@ -6,23 +6,51 @@
              x:Class="EMCLDesktop.Views.MainView"
              x:DataType="vm:MainViewModel">
     <UserControl.Resources>
-        <DataTemplate x:Key="ReadValueFormatTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
-            <StackPanel Orientation="Horizontal">
-                <ComboBox IsVisible="{Binding HasReadOctets}"
-                          ItemsSource="{Binding ReadOctetFormats}"
-                          SelectedItem="{Binding ReadOctetFormat, Mode=TwoWay}"
-                          AutomationProperties.Name="Формат считанного OctetString"
-                          ToolTip.Tip="Формат считанного OctetString" />
-                <ToggleSwitch IsVisible="{Binding HasReadNumber}"
-                              IsChecked="{Binding UseNumericHex, Mode=TwoWay}"
-                              OffContent="DEC" OnContent="HEX"
-                              AutomationProperties.Name="Шестнадцатеричный вид числа"
-                              ToolTip.Tip="DEC или HEX. В HEX показываются байты числа в A-XDR." />
+        <DataTemplate x:Key="ReadNumericValueTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
+            <StackPanel Spacing="2">
+                <SelectableTextBlock Text="{Binding DisplayedValue}" FontSize="14" TextWrapping="Wrap" />
+                <SelectableTextBlock Text="{Binding NumericHexValue}" Classes="muted" FontSize="11"
+                                     Foreground="#ACBED3" TextWrapping="Wrap" />
             </StackPanel>
+        </DataTemplate>
+        <DataTemplate x:Key="ReadOctetValueTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
+            <views:OctetStringField Text="{Binding DisplayedValue, Mode=OneWay}"
+                                    Format="{Binding ReadOctetFormat, Mode=TwoWay}"
+                                    Previews="{Binding ReadOctetPreviews}" />
         </DataTemplate>
     </UserControl.Resources>
     <UserControl.Styles>
         <StyleInclude Source="/Styles/CommonStyles.axaml" />
+        <Style Selector="ToggleButton.regex-toggle">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="#ACBED3" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="5,0" />
+            <Setter Property="Margin" Value="4,2" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="FontFamily" Value="monospace" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ToggleButton.regex-toggle:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#273B53" />
+        </Style>
+        <Style Selector="ToggleButton.regex-toggle:checked">
+            <Setter Property="Foreground" Value="#69C4E1" />
+            <Setter Property="Background" Value="#214A61" />
+            <Setter Property="BorderBrush" Value="#2C81A5" />
+        </Style>
+        <Style Selector="ToggleButton.regex-toggle:checked /template/ ContentPresenter#PART_ContentPresenter,
+                         ToggleButton.regex-toggle:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#214A61" />
+            <Setter Property="BorderBrush" Value="#2C81A5" />
+        </Style>
         <Style Selector="Button.connection-action">
             <Setter Property="Background" Value="#2C81A5" />
             <Setter Property="BorderBrush" Value="#69C4E1" />
@@ -146,7 +174,7 @@
                     <Grid Grid.Row="1" ColumnDefinitions="360,*" ColumnSpacing="16">
                         <Border Grid.Column="0" Classes="panel" Padding="0">
                             <Grid RowDefinitions="Auto,Auto,*">
-                                <StackPanel Grid.Row="0" Spacing="12" Margin="16,16,16,12">
+                                <StackPanel Grid.Row="0" Spacing="12" Margin="16,16,16,0">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                         <TextBlock Grid.Column="0" Text="Каталог OBIS" Classes="section-title" />
                                         <TextBlock Grid.Column="1" Text="{Binding VisibleObjectCount}"
@@ -155,14 +183,22 @@
                                     </Grid>
                                     <Button Content="Считать дерево" Classes="secondary"
                                             Command="{Binding ReadTreeCommand}" HorizontalAlignment="Stretch" />
-                                    <TextBox Text="{Binding SearchText}" PlaceholderText="OBIS, класс или ID" />
-                                    <CheckBox Content="Регулярное выражение" IsChecked="{Binding UseRegularExpression}" />
+                                    <TextBox x:Name="ObjectSearchBox" Text="{Binding SearchText}" PlaceholderText="OBIS, класс или ID">
+                                        <TextBox.InnerRightContent>
+                                            <ToggleButton x:Name="RegexToggle" Content=".*" Classes="regex-toggle"
+                                                          IsChecked="{Binding UseRegularExpression, Mode=TwoWay}"
+                                                          VerticalAlignment="Center"
+                                                          ToolTip.Tip="Регулярное выражение"
+                                                          AutomationProperties.Name="Регулярное выражение" />
+                                        </TextBox.InnerRightContent>
+                                    </TextBox>
                                     <TextBlock Text="{Binding SearchError}" Foreground="#FF9E9E"
+                                               IsVisible="{Binding SearchError, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}"
                                                TextWrapping="Wrap" FontSize="12" />
                                 </StackPanel>
                                 <Border Grid.Row="1" Height="1" Background="#293A52" />
                                 <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
-                                    <ItemsControl ItemsSource="{Binding VisibleGroups}" Margin="10"
+                                    <ItemsControl ItemsSource="{Binding VisibleGroups}"
                                                   HorizontalAlignment="Stretch"
                                                   IsEnabled="{Binding CanSelectObjects}">
                                         <ItemsControl.ItemTemplate>
@@ -277,14 +313,23 @@
                                                                                                     ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
                                                                                         </StackPanel>
                                                                                     </Grid>
-                                                                                    <ContentControl IsVisible="{Binding CanChooseReadFormat}" Content="{Binding .}"
-                                                                                                    ContentTemplate="{StaticResource ReadValueFormatTemplate}" />
-                                                                                    <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
-                                                                                             IsVisible="{Binding !ShowReadValueTree}"
-                                                                                             IsReadOnly="True" AcceptsReturn="True"
-                                                                                             TextWrapping="Wrap" MinHeight="42"
-                                                                                             MaxHeight="180"
-                                                                                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                    <ContentControl IsVisible="{Binding HasReadFormats}" Content="{Binding .}"
+                                                                                                    ContentTemplate="{StaticResource ReadOctetValueTemplate}" />
+                                                                                    <Border IsVisible="{Binding HasReadNumber}" Padding="10,6"
+                                                                                            MinHeight="42" Background="#172438" CornerRadius="4"
+                                                                                            BorderBrush="#31435B" BorderThickness="1">
+                                                                                        <ContentControl Content="{Binding .}" ContentTemplate="{StaticResource ReadNumericValueTemplate}" />
+                                                                                    </Border>
+                                                                                    <StackPanel IsVisible="{Binding !HasReadFormats}">
+                                                                                        <StackPanel IsVisible="{Binding !HasReadNumber}">
+                                                                                            <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
+                                                                                                     IsVisible="{Binding !ShowReadValueTree}"
+                                                                                                     IsReadOnly="True" AcceptsReturn="True"
+                                                                                                     TextWrapping="Wrap" MinHeight="42"
+                                                                                                     MaxHeight="180"
+                                                                                                     ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                                                                                        </StackPanel>
+                                                                                    </StackPanel>
                                                                                     <TreeView Classes="value-tree" ItemsSource="{Binding ReadValueNodes}"
                                                                                               IsVisible="{Binding ShowReadValueTree}"
                                                                                               MaxHeight="300" Background="#172438"
@@ -296,14 +341,17 @@
                                                                                             <TreeDataTemplate x:DataType="vm:DlmsValueNodeViewModel"
                                                                                                               ItemsSource="{Binding Children}">
                                                                                                 <StackPanel Margin="4" Spacing="4">
-                                                                                                    <WrapPanel Orientation="Horizontal">
-                                                                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
-                                                                                                                   Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                                                                        <ContentControl IsVisible="{Binding CanChooseReadFormat}" Content="{Binding .}"
-                                                                                                                        ContentTemplate="{StaticResource ReadValueFormatTemplate}" />
-                                                                                                    </WrapPanel>
-                                                                                                    <SelectableTextBlock IsVisible="{Binding IsScalar}" Text="{Binding DisplayedValue}"
-                                                                                                                         TextWrapping="Wrap" />
+                                                                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                                                                                                    <ContentControl IsVisible="{Binding HasReadFormats}" Content="{Binding .}"
+                                                                                                                    ContentTemplate="{StaticResource ReadOctetValueTemplate}" />
+                                                                                                    <StackPanel IsVisible="{Binding !HasReadFormats}">
+                                                                                                        <ContentControl IsVisible="{Binding HasReadNumber}" Content="{Binding .}"
+                                                                                                                        ContentTemplate="{StaticResource ReadNumericValueTemplate}" />
+                                                                                                        <StackPanel IsVisible="{Binding !HasReadNumber}">
+                                                                                                            <SelectableTextBlock IsVisible="{Binding IsScalar}" Text="{Binding DisplayedValue}"
+                                                                                                                                 TextWrapping="Wrap" />
+                                                                                                        </StackPanel>
+                                                                                                    </StackPanel>
                                                                                                 </StackPanel>
                                                                                             </TreeDataTemplate>
                                                                                         </TreeView.ItemTemplate>
@@ -346,16 +394,14 @@
                                                                                         <ComboBox ItemsSource="{Binding WriteTypes}"
                                                                                                   SelectedItem="{Binding WriteType, Mode=TwoWay}"
                                                                                                   PlaceholderText="Выберите тип" MinWidth="180" />
-                                                                                        <StackPanel IsVisible="{Binding IsWritingOctets}" Spacing="4">
-                                                                                            <TextBlock Text="Формат ввода OctetString" Classes="field-label" />
-                                                                                            <ComboBox ItemsSource="{Binding WriteOctetFormats}"
-                                                                                                      SelectedItem="{Binding WriteOctetFormat, Mode=OneWay}"
-                                                                                                      AutomationProperties.Name="Формат ввода OctetString"
-                                                                                                      SelectionChanged="WriteOctetFormatChanged" />
-                                                                                        </StackPanel>
                                                                                         <TextBlock Text="{Binding WriteHint}" Classes="muted" FontSize="12" />
                                                                                         <TextBlock Text="Новое значение" Classes="field-label" />
-                                                                                        <TextBox Text="{Binding WriteText, Mode=TwoWay}"
+                                                                                        <views:OctetStringField IsVisible="{Binding IsWritingOctets}" IsReadOnly="False"
+                                                                                                                Text="{Binding WriteText, Mode=TwoWay}"
+                                                                                                                Format="{Binding WriteOctetFormat, Mode=OneWay}"
+                                                                                                                Previews="{Binding WriteOctetPreviews}"
+                                                                                                                FormatRequested="WriteOctetFormatRequested" />
+                                                                                        <TextBox IsVisible="{Binding !IsWritingOctets}" Text="{Binding WriteText, Mode=TwoWay}"
                                                                                                  AutomationProperties.Name="Новое значение"
                                                                                                  AcceptsReturn="True" TextWrapping="Wrap"
                                                                                                  MinHeight="70" MaxHeight="240"
@@ -483,6 +529,13 @@
                                                                                                             <TextBlock Text="{Binding Name}"
                                                                                                                        Classes="muted" FontSize="12"
                                                                                                                        TextWrapping="Wrap" />
+                                                                                                            <ComboBox IsVisible="{Binding HasOctets}"
+                                                                                                                      ItemsSource="{Binding OctetFormats}"
+                                                                                                                      SelectedItem="{Binding OctetFormat, Mode=TwoWay}"
+                                                                                                                      HorizontalAlignment="Stretch"
+                                                                                                                      MaxDropDownHeight="320"
+                                                                                                                      AutomationProperties.Name="Кодировка столбца OctetString"
+                                                                                                                      ToolTip.Tip="Формат всех значений OctetString в столбце" />
                                                                                                         </StackPanel>
                                                                                                     </Border>
                                                                                                 </DataTemplate>
@@ -511,8 +564,11 @@
                                                                                                                         Padding="8" Background="#172438"
                                                                                                                         BorderBrush="#31435B"
                                                                                                                         BorderThickness="1">
-                                                                                                                    <TextBlock Text="{Binding Value}"
-                                                                                                                               TextWrapping="Wrap" />
+                                                                                                                    <StackPanel Spacing="2">
+                                                                                                                        <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                                                                                                                        <TextBlock Text="{Binding NumericHexValue}" IsVisible="{Binding HasNumber}"
+                                                                                                                                   Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                                                                                                                    </StackPanel>
                                                                                                                 </Border>
                                                                                                             </DataTemplate>
                                                                                                         </ItemsControl.ItemTemplate>
@@ -655,9 +711,9 @@
                     IsVisible="{Binding !IsConnecting}"
                     Content="{Binding ConnectionActionText}" Command="{Binding ToggleConnectionCommand}"
                     ToolTip.Tip="{Binding ConnectionActionText}" AutomationProperties.Name="{Binding ConnectionActionText}" />
-            <Button Classes="connection-action" IsVisible="{Binding IsConnecting}"
-                    Content="Отменить" Command="{Binding CancelConnectionCommand}"
-                    ToolTip.Tip="Отменить подключение" AutomationProperties.Name="Отменить подключение" />
+            <Button Classes="connection-action" IsVisible="{Binding IsOperationInProgress}"
+                    Content="{Binding CancelOperationText}" Command="{Binding CancelOperationCommand}"
+                    ToolTip.Tip="Отменить текущую операцию" AutomationProperties.Name="Отменить текущую операцию" />
         </StackPanel>
 
     </Grid>

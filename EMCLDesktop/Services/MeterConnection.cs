@@ -29,7 +29,24 @@ public sealed record MeterConnectionOptions(
     DlmsConformance Conformance, bool IgnoreIdenticalObjectListEntries,
     ProtocolLimits Limits, string Transport = "TCP", SerialPortSettings? Serial = null)
 {
+    internal const double DefaultHdlcAcknowledgementTimeoutSeconds = 1;
+
+    public int HdlcInformationFrameRetryCount { get; init; }
+    public double HdlcAcknowledgementTimeoutSeconds { get; init; } = DefaultHdlcAcknowledgementTimeoutSeconds;
+
     public string Endpoint => Transport == "Serial" ? Serial?.PortName ?? "" : $"{Host}:{TcpPort}";
+
+    internal static void ValidateHdlcRecovery(int retryCount, double acknowledgementTimeout, double idleTimeout)
+    {
+        if (retryCount is < 0 or > 1)
+            throw new ArgumentException("Для HDLC выберите 0 или 1 повтор.");
+        if (!double.IsFinite(acknowledgementTimeout) || acknowledgementTimeout < 0.001 ||
+            acknowledgementTimeout * 1000 > uint.MaxValue - 1)
+            throw new ArgumentException("Таймаут подтверждения HDLC должен быть не меньше 0,001 с и поддерживаться .NET.");
+        // Leave time for the initial acknowledgement, the RR poll and the replay.
+        if (retryCount > 0 && !(3 * acknowledgementTimeout < idleTimeout))
+            throw new ArgumentException("При повторах HDLC таймаут «Без обмена» должен превышать три таймаута подтверждения.");
+    }
 
     public IByteTransportFactory CreateTransportFactory()
     {
@@ -121,6 +138,10 @@ public sealed class MeterConnection : IAsyncDisposable
             (options.Conformance & DlmsConformance.Action) == 0)
             throw new ArgumentException("Для High нужен Action в Conformance.");
 
+        var idleTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
+        if (options.Framing == "HDLC")
+            MeterConnectionOptions.ValidateHdlcRecovery(options.HdlcInformationFrameRetryCount,
+                options.HdlcAcknowledgementTimeoutSeconds, options.RequestTimeoutSeconds);
         var framing = options.Framing switch
         {
             "Wrapper" => (ApduFraming)new ApduFraming.Wrapper(options.ClientAddress, options.ServerAddress),
@@ -128,8 +149,13 @@ public sealed class MeterConnection : IAsyncDisposable
                 HdlcAddress.Client(checked((byte)options.ClientAddress)),
                 HdlcAddress.Server(options.ServerAddress, options.ServerPhysicalAddress,
                     options.ExtendedHdlcAddress),
-                TimeSpan.FromSeconds(options.RequestTimeoutSeconds),
-                trace is null ? null : new Action<HdlcFrame, bool>(trace.LogFrame)),
+                idleTimeout,
+                trace is null ? null : new Action<HdlcFrame, bool>(trace.LogFrame))
+            {
+                InformationFrameRetryCount = options.HdlcInformationFrameRetryCount,
+                AcknowledgementTimeout = TimeSpan.FromSeconds(options.HdlcAcknowledgementTimeoutSeconds),
+                LinkObserver = trace is null ? null : trace.LogHdlcLinkEvent
+            },
             _ => throw new ArgumentException("Выберите Wrapper или HDLC.")
         };
         var password = Password(options);
@@ -141,9 +167,7 @@ public sealed class MeterConnection : IAsyncDisposable
 
         var transportFactory = options.CreateTransportFactory();
         IApduChannel channel = await ApduChannels.ConnectAsync(
-            new(new IdleTimeoutByteTransportFactory(
-                    transportFactory,
-                    TimeSpan.FromSeconds(options.RequestTimeoutSeconds), trace, options.Transport),
+            new(new IdleTimeoutByteTransportFactory(transportFactory, idleTimeout, trace, options.Transport),
                 framing, options.Limits),
             cancellationToken);
         if (trace is not null)
@@ -471,13 +495,15 @@ public sealed class MeterConnection : IAsyncDisposable
         catch { /* A status subscriber must not fault connection cleanup. */ }
     }
 
-    public ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => DisposeAsync(CancellationToken.None);
+
+    public ValueTask DisposeAsync(CancellationToken cancellationToken)
     {
         lock (disposeSync)
-            return new(disposeTask ??= DisposeCoreAsync());
+            return new(disposeTask ??= DisposeCoreAsync(cancellationToken));
     }
 
-    private async Task DisposeCoreAsync()
+    private async Task DisposeCoreAsync(CancellationToken cancellationToken)
     {
         keepAliveStop.Cancel();
         await keepAliveTask.ConfigureAwait(false);
@@ -486,7 +512,8 @@ public sealed class MeterConnection : IAsyncDisposable
         {
             if (session.State == ClientSessionState.Associated)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(2));
                 await session.ReleaseAsync(timeout.Token);
             }
         }

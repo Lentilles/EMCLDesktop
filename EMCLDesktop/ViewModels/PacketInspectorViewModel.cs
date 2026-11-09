@@ -161,9 +161,10 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     [RelayCommand] private void LiveSource() => SourceIndex = 0;
     [RelayCommand] private void TextSource() => SourceIndex = 1;
 
-    [RelayCommand]
-    private async Task AnalyzeTextAsync()
+    [RelayCommand(IncludeCancelCommand = true)]
+    private async Task AnalyzeTextAsync(CancellationToken cancellationToken)
     {
+        using var analysis = CancellationTokenSource.CreateLinkedTokenSource(stopToken, cancellationToken);
         string input = InputText;
         int version = textVersion;
         IsAnalyzing = true;
@@ -173,9 +174,10 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         {
             var result = await Task.Run(() =>
             {
-                var packets = PacketAnalyzer.AnalyzeText(input, out int ignored, stopToken);
+                var packets = PacketAnalyzer.AnalyzeText(input, out int ignored, analysis.Token);
                 return (Packets: packets, Ignored: ignored);
-            }, stopToken);
+            }, analysis.Token);
+            analysis.Token.ThrowIfCancellationRequested();
             if (disposed || version != textVersion) return;
             textPackets.Clear();
             selections.Remove(1);
@@ -191,6 +193,11 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             }
         }
         catch (OperationCanceledException) when (disposed) { }
+        catch (OperationCanceledException) when (analysis.IsCancellationRequested)
+        {
+            textStatus = "Разбор лога отменён.";
+            if (IsText) AnalysisStatus = textStatus;
+        }
         catch (Exception error)
         {
             textStatus = $"Не удалось разобрать лог: {error.Message}";

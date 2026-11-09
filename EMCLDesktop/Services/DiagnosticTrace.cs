@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text;
 using EMCL.Core.Codecs;
+using EMCL.Framing;
 using EMCL.Framing.Hdlc.Frames;
 using EMCL.Protocol.Acse;
 using EMCL.Protocol.Apdu;
@@ -144,6 +145,22 @@ public sealed class DiagnosticTrace
             UaParameters(frame));
     }
 
+    public void LogHdlcLinkEvent(HdlcLinkEvent linkEvent)
+    {
+        switch (linkEvent)
+        {
+            case HdlcLinkEvent.ChecksumError checksum:
+                Add($"RX HDLC: кадр отброшен из-за ошибки контрольной суммы. {checksum.Error}");
+                break;
+            case HdlcLinkEvent.RecoveryPoll poll:
+                Add($"TX HDLC: запрос RR после таймаута подтверждения I-кадра N(S)={poll.SendSequence}, попытка {poll.Attempt}.");
+                break;
+            case HdlcLinkEvent.Retransmission retry:
+                Add($"TX HDLC: повтор I-кадра N(S)={retry.SendSequence} по ответу RR, попытка {retry.Attempt}.");
+                break;
+        }
+    }
+
     private static string UaParameters(HdlcFrame frame)
     {
         if (frame.Control != HdlcControl.Ua || frame.Information.IsDefaultOrEmpty)
@@ -222,7 +239,8 @@ public sealed class DiagnosticTrace
     }
 }
 
-internal sealed class TracingApduChannel(IApduChannel inner, DiagnosticTrace trace) : IApduChannel
+internal sealed class TracingApduChannel(IApduChannel inner, DiagnosticTrace trace)
+    : IApduChannel
 {
     public async ValueTask<ReadOnlyMemory<byte>?> ReceiveAsync(CancellationToken cancellationToken = default)
     {

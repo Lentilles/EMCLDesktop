@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using EMCLDesktop.ViewModels;
 using EMCLDesktop.Services;
+using EMCL.Framing;
 using EMCL.Transport.Streams;
 
 int checks = 0;
@@ -27,11 +28,18 @@ byte[] rx = [0xFF, 0xDB, 0xAA, 0x00, 0x7E];
 var trace = new DiagnosticTrace();
 trace.BeginConnection("HDLC");
 trace.Add("Описание обмена");
+trace.LogHdlcLinkEvent(new HdlcLinkEvent.ChecksumError("Invalid HDLC FCS."));
+trace.LogHdlcLinkEvent(new HdlcLinkEvent.RecoveryPoll(3, 1));
+trace.LogHdlcLinkEvent(new HdlcLinkEvent.Retransmission(3, 1));
 trace.LogTcpBytes("TX", tx);
 trace.Add("Получен ответ");
 trace.LogTcpBytes("RX", rx);
 Check(trace.DisplayFormat == TraceDisplayFormat.Verbal, "Default is not verbal");
 Check(trace.Snapshot().Contains("Описание обмена"), "Verbal description missing");
+Check(Lines(trace).Any(s => s.Contains("ошибки контрольной суммы") && s.Contains("Invalid HDLC FCS")) &&
+      Lines(trace).Any(s => s.Contains("запрос RR после таймаута") && s.Contains("N(S)=3, попытка 1")) &&
+      Lines(trace).Any(s => s.Contains("повтор I-кадра N(S)=3 по ответу RR, попытка 1")),
+    "HDLC recovery events lost their reasons, frame sequence or attempt");
 Check(!trace.Snapshot().Contains(" HEX "), "Verbal mode contains a byte dump");
 Check(Tokens(trace).Length == 0, "Verbal mode contains raw bytes");
 
@@ -108,6 +116,7 @@ await using (var transport = new IdleTimeoutByteTransport(fake, TimeSpan.FromSec
 }
 // Connection selection and JSON round trips must work without opening real hardware.
 var vm = new MainViewModel();
+Check(vm.Host == "" && vm.TcpPort == "", "New TCP settings contain a prefilled endpoint");
 Check(!vm.HasStatusError, "Initial status must not show error-copy action");
 vm.ReportError("Счётчик отклонил запрос");
 Check(vm.HasStatusError, "Device refusal without an error prefix must expose error-copy action");
@@ -172,6 +181,8 @@ vm.SerialDtrEnable = true;
 vm.SerialRtsEnable = true;
 vm.Host = "";
 vm.TcpPort = "unused";
+vm.HdlcInformationFrameRetryCount = 1;
+vm.HdlcAcknowledgementTimeoutSeconds = "0.75";
 await using var serialJson = new MemoryStream();
 await vm.SaveConfigurationAsync(serialJson);
 Check(!vm.HasStatusError, "Successful save retained stale error-copy action");
@@ -180,6 +191,10 @@ var serialSettings = savedSerial["channel"]!["connection"]!;
 Check(serialSettings["kind"]!.GetValue<string>() == "Serial" && serialSettings["host"] is null &&
       serialSettings["tcpPort"] is null, "Serial JSON contains TCP fields");
 Check(serialSettings["baudRate"]!.GetValue<int>() == 19200, "Serial baud rate lost");
+var savedHdlc = savedSerial["channel"]!["framing"]!;
+Check(savedHdlc["informationFrameRetryCount"]!.GetValue<int>() == 1 &&
+      savedHdlc["acknowledgementTimeoutSeconds"]!.GetValue<double>() == 0.75,
+    "HDLC recovery settings missing from JSON");
 var restored = new MainViewModel();
 serialJson.Position = 0;
 await restored.LoadConfigurationAsync(serialJson);
@@ -187,6 +202,12 @@ Check(restored.IsSerial && restored.SerialPortName == vm.SerialPortName && resto
       restored.SerialDataBits == 7 && restored.SerialParity == Parity.Even && restored.SerialStopBits == StopBits.Two &&
       restored.SerialHandshake == Handshake.XOnXOff && restored.SerialDtrEnable && restored.SerialRtsEnable,
     "Serial JSON round trip lost settings: " + restored.Status);
+Check(restored.HdlcInformationFrameRetryCount == 1 && restored.HdlcAcknowledgementTimeoutSeconds == "0.75",
+    "HDLC recovery settings did not round trip");
+vm.IdleTimeoutSeconds = "2.25";
+try { await vm.SaveConfigurationAsync(new MemoryStream()); throw new Exception("Too short an idle timeout was accepted"); }
+catch (ArgumentException) { checks++; }
+vm.IdleTimeoutSeconds = "120";
 restored.SerialHandshake = Handshake.RequestToSend;
 Check(!restored.CanSetSerialRts && !restored.SerialRtsEnable, "Hardware handshake did not take over RTS");
 restored.SerialHandshake = Handshake.None;
@@ -208,12 +229,16 @@ vm.Host = "127.0.0.1";
 vm.TcpPort = "4059";
 vm.Framing = "Wrapper";
 vm.ServerPhysicalAddress = "unused";
+vm.HdlcAcknowledgementTimeoutSeconds = "unused";
 await using var tcpJson = new MemoryStream();
 await vm.SaveConfigurationAsync(tcpJson);
 var savedTcp = JsonNode.Parse(tcpJson.ToArray())!;
 var tcpSettings = savedTcp["channel"]!["connection"]!.AsObject();
 Check(tcpSettings["kind"]!.GetValue<string>() == "Tcp" && tcpSettings["portName"] is null,
     "TCP JSON contains Serial settings");
+var savedWrapper = savedTcp["channel"]!["framing"]!;
+Check(savedWrapper["informationFrameRetryCount"] is null && savedWrapper["acknowledgementTimeoutSeconds"] is null,
+    "Wrapper JSON contains HDLC recovery settings");
 tcpSettings.Remove("kind");
 await restored.LoadConfigurationAsync(new MemoryStream(Encoding.UTF8.GetBytes(savedTcp.ToJsonString())));
 Check(restored.IsTcp && restored.Host == "127.0.0.1" && restored.TcpPort == "4059" && restored.Framing == "Wrapper",
@@ -226,6 +251,8 @@ var legacy = new JsonObject
 await restored.LoadConfigurationAsync(new MemoryStream(Encoding.UTF8.GetBytes(legacy.ToJsonString())));
 Check(restored.IsTcp && restored.Host == "localhost" && restored.TcpPort == "93" && restored.IsHdlc,
     "Legacy TCP configuration did not load: " + restored.Status);
+Check(restored.HdlcInformationFrameRetryCount == 0 && restored.HdlcAcknowledgementTimeoutSeconds == "1",
+    "Legacy configuration did not receive safe HDLC recovery defaults");
 
 // Factory selection validates only the active endpoint and forwards line settings unchanged.
 var options = new MeterConnectionOptions("", 0, "HDLC", 16, 1, null, false, 1, "0.0.40.0.0.255",
@@ -251,6 +278,9 @@ Check(Tokens(serialTrace).SequenceEqual(Hex([.. rx, .. tx, 1])), "Serial tracing
 Console.WriteLine($"Passed {checks} trace and connection checks.");
 Console.WriteLine($"Passed {await PacketInspectionChecks.RunAsync()} packet inspector checks.");
 Console.WriteLine($"Passed {await AttributeWriteChecks.RunAsync()} attribute write checks.");
+Console.WriteLine($"Passed {ProfileTableChecks.Run()} profile table checks.");
+Console.WriteLine($"Passed {await CatalogTypeChecks.RunAsync()} catalog type checks.");
+Console.WriteLine($"Passed {await CancellationChecks.RunAsync()} cancellation checks.");
 
 sealed class FakeTransport(byte[] received) : IByteTransport
 {

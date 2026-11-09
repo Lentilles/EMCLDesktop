@@ -1,10 +1,62 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using EMCL.Core.Values;
+using EMCLDesktop.Services;
 
 namespace EMCLDesktop.ViewModels;
 
-public sealed record ProfileColumnViewModel(string Obis, string Name);
+public sealed partial class ProfileColumnViewModel(string obis, string name,
+    OctetStringFormat? initialFormat = null) : ObservableObject
+{
+    private readonly List<ProfileCellViewModel> octetCells = [];
 
-public sealed record ProfileCellViewModel(string Value);
+    public string Obis { get; } = obis;
+    public string Name { get; } = name;
+    public IReadOnlyList<OctetStringFormat> OctetFormats => OctetStringFormat.ReadOptions;
+    [ObservableProperty] public partial bool HasOctets { get; private set; }
+    [ObservableProperty]
+    public partial OctetStringFormat? OctetFormat { get; set; } = initialFormat ?? OctetStringFormat.Hex;
+
+    internal void RegisterOctetCell(ProfileCellViewModel cell)
+    {
+        octetCells.Add(cell);
+        HasOctets = true;
+    }
+
+    partial void OnOctetFormatChanged(OctetStringFormat? value)
+    {
+        foreach (var cell in octetCells) cell.RefreshFormat();
+    }
+}
+
+public sealed class ProfileCellViewModel : ObservableObject
+{
+    private readonly string text;
+    private readonly DlmsValue? octets;
+    private readonly ProfileColumnViewModel? column;
+
+    public ProfileCellViewModel(string value) => text = value;
+
+    internal ProfileCellViewModel(DlmsValue value, ProfileColumnViewModel column)
+    {
+        text = DlmsDisplay.IsNumeric(value.Type) ? DlmsDisplay.NumericDecimal(value) : DlmsDisplay.Value(value);
+        NumericHexValue = DlmsDisplay.IsNumeric(value.Type) ? DlmsDisplay.NumericHex(value) : "";
+        if (value.Type == DlmsType.OctetString)
+        {
+            octets = value;
+            this.column = column;
+            column.RegisterOctetCell(this);
+        }
+    }
+
+    public string NumericHexValue { get; } = "";
+    public bool HasNumber => NumericHexValue.Length != 0;
+
+    public string Value => octets is not null && column?.OctetFormat is { } format && format != OctetStringFormat.Hex
+        ? DlmsDisplay.OctetPreview(octets, format) ?? $"{DlmsDisplay.UnavailableOctetPreview(format)}. HEX\n{text}"
+        : text;
+
+    internal void RefreshFormat() => OnPropertyChanged(nameof(Value));
+}
 
 public sealed record ProfileRowViewModel(int Number, IReadOnlyList<ProfileCellViewModel> Cells);
 

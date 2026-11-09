@@ -20,6 +20,7 @@ public sealed partial class DlmsValueNodeViewModel : DlmsValuePreviewViewModel
         Label = label;
         this.scalar = scalar;
         scalarText = DlmsDisplay.Value(scalar);
+        RefreshOctetPreviews(scalar);
     }
 
     private DlmsValueNodeViewModel(string label, ImmutableArray<DlmsValue> items, int start, int count)

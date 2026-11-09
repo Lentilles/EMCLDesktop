@@ -145,9 +145,7 @@ public partial class MainView : UserControl
             });
             if (file is null) return;
             await using var stream = await file.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-            await writer.WriteAsync(trace);
-            viewModel.Status = "Трассировка сохранена.";
+            await viewModel.SaveTraceAsync(stream);
         }
         catch (System.Exception error)
         {
@@ -175,11 +173,11 @@ public partial class MainView : UserControl
             attribute.ToggleWriteEditor();
     }
 
-    private void WriteOctetFormatChanged(object? sender, SelectionChangedEventArgs e)
+    private void WriteOctetFormatRequested(object? sender, OctetFormatRequestedEventArgs e)
     {
-        if (sender is ComboBox { DataContext: AttributeViewModel attribute, SelectedItem: OctetStringFormat format } box &&
-            !attribute.TryChangeWriteOctetFormat(format))
-            box.SetCurrentValue(ComboBox.SelectedItemProperty, attribute.WriteOctetFormat);
+        if (sender is not Control { DataContext: AttributeViewModel attribute }) return;
+        e.Handled = true;
+        attribute.TryChangeWriteOctetFormat(e.Format);
     }
 
     private async void WriteAttributeClick(object? sender, RoutedEventArgs e)
