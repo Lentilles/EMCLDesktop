@@ -169,6 +169,24 @@
                             <TextBox Text="{Binding MaxReceivePduSize}" />
                         </StackPanel>
                     </Grid>
+                    <StackPanel IsVisible="{Binding IsHdlc}" Spacing="8">
+                        <CheckBox x:Name="HdlcSizesToggle" Content="Согласовывать MAX TX / MAX RX"
+                                  IsChecked="{Binding UseHdlcLinkParameters, Mode=TwoWay}" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12" IsEnabled="{Binding UseHdlcLinkParameters}">
+                            <StackPanel Spacing="5">
+                                <TextBlock Text="MAX TX, байт" Classes="field-label" />
+                                <TextBox x:Name="HdlcMaxTxInput" Text="{Binding HdlcMaxTxBytes, Mode=TwoWay}"
+                                         AutomationProperties.Name="HDLC MAX TX, байт" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                                <TextBlock Text="MAX RX, байт" Classes="field-label" />
+                                <TextBox x:Name="HdlcMaxRxInput" Text="{Binding HdlcMaxRxBytes, Mode=TwoWay}"
+                                         AutomationProperties.Name="HDLC MAX RX, байт" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="TX — отправка из приложения, RX — приём. От 3 до 2030 байт, включая LLC. Окна TX/RX — по 1 кадру."
+                                   Classes="muted" FontSize="12" />
+                    </StackPanel>
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="12" IsVisible="{Binding IsHdlc}">
                         <StackPanel Grid.Column="0" Spacing="5">
                             <TextBlock Text="Повторы неподтверждённых кадров HDLC"

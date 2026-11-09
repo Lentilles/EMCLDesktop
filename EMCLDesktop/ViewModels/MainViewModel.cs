@@ -12,6 +12,7 @@ using EMCL.Core.Codecs;
 using EMCL.Core.Objects;
 using EMCL.Core.Operations;
 using EMCL.Core.Values;
+using EMCL.Framing;
 using EMCL.Objects.Definitions;
 using EMCL.Objects.ProfileGeneric;
 using EMCL.Protocol.Acse;
@@ -86,6 +87,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial string ServerAddress { get; set; } = "1";
     [ObservableProperty] public partial string ServerPhysicalAddress { get; set; } = "17";
     [ObservableProperty] public partial bool ExtendedHdlcAddress { get; set; }
+    [ObservableProperty] public partial bool UseHdlcLinkParameters { get; set; }
+    [ObservableProperty] public partial string HdlcMaxTxBytes { get; set; } = "128";
+    [ObservableProperty] public partial string HdlcMaxRxBytes { get; set; } = "128";
     [ObservableProperty] public partial int HdlcInformationFrameRetryCount { get; set; }
     [ObservableProperty] public partial string HdlcAcknowledgementTimeoutSeconds { get; set; } =
         MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
@@ -403,9 +407,18 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 legacy ? "hdlcExtendedAddress" : "extendedAddress", false);
             double importedIdleTimeout = GetDouble(association, "requestTimeoutSeconds", 30);
             int importedHdlcRetryCount = 0;
+            HdlcLinkParameters? importedHdlcParameters = null;
             double importedHdlcAcknowledgementTimeout = MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds;
             if (importedFraming == "HDLC")
             {
+                if (framingSettings.TryGetProperty("hdlcLinkParameters", out var parameters) && parameters.ValueKind != JsonValueKind.Null)
+                {
+                    importedHdlcParameters = new HdlcLinkParameters(
+                        GetInt(parameters, "maximumTransmitInformationBytes", 128),
+                        GetInt(parameters, "maximumReceiveInformationBytes", 128),
+                        GetInt(parameters, "transmitWindowFrames", 1), GetInt(parameters, "receiveWindowFrames", 1));
+                    _ = HdlcNegotiation.CreateSnrmInformation(importedHdlcParameters);
+                }
                 importedHdlcRetryCount = GetInt(framingSettings, "informationFrameRetryCount", 0);
                 importedHdlcAcknowledgementTimeout = GetDouble(framingSettings, "acknowledgementTimeoutSeconds",
                     MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds);
@@ -473,6 +486,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             ServerAddress = importedServer;
             ServerPhysicalAddress = importedPhysical;
             ExtendedHdlcAddress = importedExtended;
+            UseHdlcLinkParameters = importedHdlcParameters is not null;
+            HdlcMaxTxBytes = (importedHdlcParameters?.MaximumTransmitInformationBytes ?? 128).ToString(CultureInfo.InvariantCulture);
+            HdlcMaxRxBytes = (importedHdlcParameters?.MaximumReceiveInformationBytes ?? 128).ToString(CultureInfo.InvariantCulture);
             HdlcInformationFrameRetryCount = importedHdlcRetryCount;
             HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
             AssociationVersion = association.GetProperty("version").GetByte().ToString(CultureInfo.InvariantCulture);
@@ -559,6 +575,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                         serverLogicalAddress = options.ServerAddress,
                         serverPhysicalAddress = options.ServerPhysicalAddress,
                         extendedAddress = options.ExtendedHdlcAddress,
+                        hdlcLinkParameters = options.Framing == "HDLC" ? options.HdlcParameters : null,
                         informationFrameRetryCount = options.Framing == "HDLC" ? (int?)options.HdlcInformationFrameRetryCount : null,
                         acknowledgementTimeoutSeconds = options.Framing == "HDLC" ? (double?)options.HdlcAcknowledgementTimeoutSeconds : null,
                         clientPort = options.ClientAddress,
@@ -956,8 +973,21 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 CultureInfo.InvariantCulture, out double keepAliveInterval))
             throw new ArgumentException("Таймауты должны быть числами в секундах.");
         double hdlcAcknowledgementTimeout = MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds;
+        HdlcLinkParameters? hdlcParameters = null;
         if (IsHdlc)
         {
+            if (UseHdlcLinkParameters)
+            {
+                int ParseInformationSize(string text, string name)
+                {
+                    if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int size) ||
+                        size < 3 || size > HdlcNegotiation.MaximumInformationBytes)
+                        throw new ArgumentException($"{name}: укажите целое число от 3 до {HdlcNegotiation.MaximumInformationBytes} байт.");
+                    return size;
+                }
+                hdlcParameters = new HdlcLinkParameters(ParseInformationSize(HdlcMaxTxBytes, "MAX TX"),
+                    ParseInformationSize(HdlcMaxRxBytes, "MAX RX"));
+            }
             if (!double.TryParse(HdlcAcknowledgementTimeoutSeconds, NumberStyles.Float,
                     CultureInfo.InvariantCulture, out hdlcAcknowledgementTimeout))
                 throw new ArgumentException("Укажите таймаут подтверждения HDLC в секундах.");
@@ -976,6 +1006,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             IgnoreIdenticalObjectListEntries, limits, Transport, serial)
         {
             HdlcInformationFrameRetryCount = IsHdlc ? HdlcInformationFrameRetryCount : 0,
+            HdlcParameters = hdlcParameters,
             HdlcAcknowledgementTimeoutSeconds = hdlcAcknowledgementTimeout
         };
         _ = options.CreateTransportFactory();

@@ -145,6 +145,19 @@ public sealed class DiagnosticTrace
             UaParameters(frame));
     }
 
+    public void LogHdlcNegotiation(HdlcNegotiationResult result)
+    {
+        var proposed = result.Proposed;
+        var received = result.Received;
+        var effective = result.Effective;
+        string proposal = proposed is null ? "SNRM без параметров (локально 128 байт)"
+            : $"SNRM клиента: MAX TX={proposed.MaximumTransmitInformationBytes}, MAX RX={proposed.MaximumReceiveInformationBytes} байт";
+        Add($"HDLC согласование: {proposal}; UA счётчика: MAX TX={received?.MaximumTransmitInformationBytes?.ToString() ?? "не указан"}, " +
+            $"MAX RX={received?.MaximumReceiveInformationBytes?.ToString() ?? "не указан"}; " +
+            $"итог клиента: MAX TX={effective.MaximumTransmitInformationBytes}, MAX RX={effective.MaximumReceiveInformationBytes} байт, " +
+            $"окна TX={effective.TransmitWindowFrames}, RX={effective.ReceiveWindowFrames} кадров.");
+    }
+
     public void LogHdlcLinkEvent(HdlcLinkEvent linkEvent)
     {
         switch (linkEvent)

@@ -121,6 +121,8 @@ The **No traffic** setting specifies the maximum idle interval without bytes bei
 
 For HDLC, set **Unacknowledged frame retries** to `1` to enable recovery. After the acknowledgement timeout (1 second by default), EMCL polls the meter with RR and resends the I-frame only if the meter still expects it. This applies to association setup and subsequent I-frames. **No traffic** must exceed three acknowledgement intervals. Both settings are saved in JSON. Retries default to `0`, including when loading older configurations.
 
+Enable **Negotiate MAX TX / MAX RX** (`Согласовывать MAX TX / MAX RX`) to propose HDLC information sizes for the next connection. TX is transmission from the application; RX is reception by the application. Each value accepts `3–2030` bytes including LLC; both default to `128`. EMCL 0.2.3 supports one-frame TX/RX windows. The trace records the client proposal, the meter's UA values and the effective client limits, which may be smaller than requested. Disabling the option preserves empty SNRM behavior. Older configurations load with this option disabled. JSON stores enabled proposals under `channel.framing.hdlcLinkParameters`; Wrapper configurations omit them. This setting is independent of Max PDU.
+
 By default, **KeepAlive** reads the Association LN object's `logical_name` with a short GET request after 20 seconds of inactivity. The interval can be configured from 1 to 3600 seconds. No extra requests are sent while reading attributes or profiles. If the session is lost, the application displays an error, closes the connection, and allows you to reconnect.
 
 ## Objects and Profile Generic

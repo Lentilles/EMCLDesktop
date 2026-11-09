@@ -33,6 +33,25 @@ public sealed record MeterConnectionOptions(
 
     public int HdlcInformationFrameRetryCount { get; init; }
     public double HdlcAcknowledgementTimeoutSeconds { get; init; } = DefaultHdlcAcknowledgementTimeoutSeconds;
+    public HdlcLinkParameters? HdlcParameters { get; init; }
+
+    public ApduFraming CreateFraming(DiagnosticTrace? trace = null)
+    {
+        if (Framing == "Wrapper") return new ApduFraming.Wrapper(ClientAddress, ServerAddress);
+        if (Framing != "HDLC") throw new ArgumentException("Выберите Wrapper или HDLC.");
+        ValidateHdlcRecovery(HdlcInformationFrameRetryCount, HdlcAcknowledgementTimeoutSeconds, RequestTimeoutSeconds);
+        _ = HdlcNegotiation.CreateSnrmInformation(HdlcParameters);
+        return new ApduFraming.Hdlc(HdlcAddress.Client(checked((byte)ClientAddress)),
+            HdlcAddress.Server(ServerAddress, ServerPhysicalAddress, ExtendedHdlcAddress),
+            TimeSpan.FromSeconds(RequestTimeoutSeconds), trace is null ? null : trace.LogFrame)
+        {
+            LinkParameters = HdlcParameters,
+            NegotiationObserver = trace is null ? null : trace.LogHdlcNegotiation,
+            InformationFrameRetryCount = HdlcInformationFrameRetryCount,
+            AcknowledgementTimeout = TimeSpan.FromSeconds(HdlcAcknowledgementTimeoutSeconds),
+            LinkObserver = trace is null ? null : trace.LogHdlcLinkEvent
+        };
+    }
 
     public string Endpoint => Transport == "Serial" ? Serial?.PortName ?? "" : $"{Host}:{TcpPort}";
 
@@ -139,25 +158,7 @@ public sealed class MeterConnection : IAsyncDisposable
             throw new ArgumentException("Для High нужен Action в Conformance.");
 
         var idleTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
-        if (options.Framing == "HDLC")
-            MeterConnectionOptions.ValidateHdlcRecovery(options.HdlcInformationFrameRetryCount,
-                options.HdlcAcknowledgementTimeoutSeconds, options.RequestTimeoutSeconds);
-        var framing = options.Framing switch
-        {
-            "Wrapper" => (ApduFraming)new ApduFraming.Wrapper(options.ClientAddress, options.ServerAddress),
-            "HDLC" => new ApduFraming.Hdlc(
-                HdlcAddress.Client(checked((byte)options.ClientAddress)),
-                HdlcAddress.Server(options.ServerAddress, options.ServerPhysicalAddress,
-                    options.ExtendedHdlcAddress),
-                idleTimeout,
-                trace is null ? null : new Action<HdlcFrame, bool>(trace.LogFrame))
-            {
-                InformationFrameRetryCount = options.HdlcInformationFrameRetryCount,
-                AcknowledgementTimeout = TimeSpan.FromSeconds(options.HdlcAcknowledgementTimeoutSeconds),
-                LinkObserver = trace is null ? null : trace.LogHdlcLinkEvent
-            },
-            _ => throw new ArgumentException("Выберите Wrapper или HDLC.")
-        };
+        var framing = options.CreateFraming(trace);
         var password = Password(options);
         if (options.Authentication != ClientAuthentication.None && password.IsEmpty)
             throw new ArgumentException("Укажите пароль.");

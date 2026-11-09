@@ -281,6 +281,7 @@ Console.WriteLine($"Passed {await AttributeWriteChecks.RunAsync()} attribute wri
 Console.WriteLine($"Passed {ProfileTableChecks.Run()} profile table checks.");
 Console.WriteLine($"Passed {await CatalogTypeChecks.RunAsync()} catalog type checks.");
 Console.WriteLine($"Passed {await CancellationChecks.RunAsync()} cancellation checks.");
+Console.WriteLine($"Passed {await HdlcSizingChecks.RunAsync()} HDLC size checks.");
 
 sealed class FakeTransport(byte[] received) : IByteTransport
 {
