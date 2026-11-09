@@ -27,6 +27,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     private const int ObjectsTabIndex = 0;
     private const int InspectorTabIndex = 1;
     private const int TraceTabIndex = 2;
+    private const int ConnectionSettingsTabIndex = 3;
 
     private MeterConnection? connection;
     private Task closingConnectionTask = Task.CompletedTask;
@@ -180,6 +181,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         _ => "Ожидание заголовка буфера профиля…"
     };
     public bool IsObjectsTab => SelectedTabIndex == ObjectsTabIndex;
+    public bool IsInspectorTab => SelectedTabIndex == InspectorTabIndex;
+    public bool IsTraceTab => SelectedTabIndex == TraceTabIndex;
+    public bool IsConnectionSettingsTab => SelectedTabIndex == ConnectionSettingsTabIndex;
+    public string SectionTitle => SelectedTabIndex switch
+    {
+        InspectorTabIndex => "Инспектор",
+        TraceTabIndex => "Трассировка",
+        ConnectionSettingsTabIndex => "Параметры подключения",
+        _ => "Объекты"
+    };
 
     public PacketInspectorViewModel Inspector { get; }
 
@@ -194,6 +205,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnSelectedTabIndexChanged(int value)
     {
         OnPropertyChanged(nameof(IsObjectsTab));
+        OnPropertyChanged(nameof(IsInspectorTab));
+        OnPropertyChanged(nameof(IsTraceTab));
+        OnPropertyChanged(nameof(IsConnectionSettingsTab));
+        OnPropertyChanged(nameof(SectionTitle));
         Inspector.IsActive = value == InspectorTabIndex;
         if (value == TraceTabIndex) TraceText = trace.Snapshot();
     }

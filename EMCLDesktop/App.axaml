@@ -13,6 +13,13 @@
         </NativeMenu>
     </NativeMenu.Menu>
 
+    <Application.Resources>
+        <SolidColorBrush x:Key="WorkspaceNavigationBackground" Color="#1C2B41" />
+        <SolidColorBrush x:Key="WorkspaceSidebarBackground" Color="#142033" />
+        <SolidColorBrush x:Key="WorkspaceContentBackground" Color="#0D1726" />
+        <SolidColorBrush x:Key="WorkspaceDividerBrush" Color="#31435B" />
+    </Application.Resources>
+
     <Application.DataTemplates>
         <local:ViewLocator />
     </Application.DataTemplates>

@@ -3,10 +3,19 @@
              xmlns:vm="using:EMCLDesktop.ViewModels"
              x:Class="EMCLDesktop.Views.ConnectionSettingsView"
              x:DataType="vm:MainViewModel">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Spacing="16" MaxWidth="1120" HorizontalAlignment="Stretch">
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-                <Border Grid.Column="0" Classes="panel">
+    <UserControl.Styles>
+        <StyleInclude Source="/Styles/CommonStyles.axaml" />
+        <Style Selector="Border.settings-section">
+            <Setter Property="Background" Value="{StaticResource WorkspaceContentBackground}" />
+            <Setter Property="BorderBrush" Value="#293A52" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+    </UserControl.Styles>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" Background="{StaticResource WorkspaceContentBackground}">
+        <StackPanel Spacing="0" HorizontalAlignment="Stretch">
+            <Grid ColumnDefinitions="*,*">
+                <Border Grid.Column="0" Classes="settings-section">
                     <StackPanel Spacing="16">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Подключение" Classes="section-title" />
@@ -79,7 +88,7 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="1" Classes="panel">
+                <Border Grid.Column="1" Classes="settings-section">
                     <StackPanel Spacing="16">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Адресация" Classes="section-title" />
@@ -108,7 +117,7 @@
                 </Border>
             </Grid>
 
-            <Border Classes="panel">
+            <Border Classes="settings-section">
                 <StackPanel Spacing="16">
                     <StackPanel Spacing="3">
                         <TextBlock Text="Ассоциация и доступ" Classes="section-title" />
@@ -148,7 +157,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Classes="panel">
+            <Border Classes="settings-section">
                 <StackPanel Spacing="16">
                     <StackPanel Spacing="3">
                         <TextBlock Text="Параметры обмена" Classes="section-title" />

@@ -11,35 +11,22 @@ namespace EMCLDesktop.Views;
 
 public partial class MainView : UserControl
 {
-    private ConnectionSettingsWindow? connectionSettingsWindow;
-
     public MainView()
     {
         InitializeComponent();
     }
 
-    private async void OpenConnectionSettingsClick(object? sender, RoutedEventArgs e) =>
-        await OpenConnectionSettingsAsync();
-
-    public async System.Threading.Tasks.Task OpenConnectionSettingsAsync()
+    private void NavigateClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel viewModel || !viewModel.CanEditConfiguration ||
-            connectionSettingsWindow is not null || TopLevel.GetTopLevel(this) is not Window owner)
-            return;
+        if (sender is Control { Tag: string index } &&
+            DataContext is MainViewModel viewModel && int.TryParse(index, out int section))
+            viewModel.SelectedTabIndex = section;
+    }
 
-        try
-        {
-            connectionSettingsWindow = new ConnectionSettingsWindow { DataContext = viewModel };
-            await connectionSettingsWindow.ShowDialog(owner);
-        }
-        catch (System.Exception error)
-        {
-            viewModel.ReportError($"Не удалось открыть параметры подключения: {error.Message}");
-        }
-        finally
-        {
-            connectionSettingsWindow = null;
-        }
+    public void OpenConnectionSettings()
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SelectedTabIndex = 3;
     }
 
     private async void LoadConfigurationClick(object? sender, RoutedEventArgs e) =>

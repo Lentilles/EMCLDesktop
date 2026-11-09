@@ -66,10 +66,10 @@ public partial class App : Application
         }
     }
 
-    private async void ConnectionSettingsMenuItemClick(object? sender, System.EventArgs e)
+    private void ConnectionSettingsMenuItemClick(object? sender, System.EventArgs e)
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
             { MainWindow.Content: MainView mainView })
-            await mainView.OpenConnectionSettingsAsync();
+            mainView.OpenConnectionSettings();
     }
 }

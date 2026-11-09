@@ -8,19 +8,7 @@
         x:Class="EMCLDesktop.Views.MainWindow"
         Icon="/Assets/emcl-desktop.ico"
         Title="EMCL Desktop — счётчик DLMS/COSEM"
-        Background="#0D1726"
+        Background="{StaticResource WorkspaceContentBackground}"
         Width="1320" Height="840" MinWidth="1000" MinHeight="680">
-    <NativeMenu.Menu>
-        <NativeMenu>
-            <NativeMenuItem Header="File">
-                <NativeMenu NeedsUpdate="FileMenuNeedsUpdate">
-                    <NativeMenuItem Header="Загрузить…"
-                                    Gesture="Meta+O" Click="LoadConfigurationMenuItemClick" />
-                    <NativeMenuItem Header="Сохранить…"
-                                    Gesture="Meta+S" Click="SaveConfigurationMenuItemClick" />
-                </NativeMenu>
-            </NativeMenuItem>
-        </NativeMenu>
-    </NativeMenu.Menu>
-        <views:MainView />
+    <views:MainView />
 </Window>
