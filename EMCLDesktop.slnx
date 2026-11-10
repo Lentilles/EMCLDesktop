@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/DirectoryProps/">
+    <File Path=".gitignore" />
+  </Folder>
   <Project Path="EMCLDesktop.Android/EMCLDesktop.Android.csproj">
     <Deploy />
   </Project>
