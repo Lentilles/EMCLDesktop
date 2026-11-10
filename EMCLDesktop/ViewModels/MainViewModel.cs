@@ -88,9 +88,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial string ServerAddress { get; set; } = "1";
     [ObservableProperty] public partial string ServerPhysicalAddress { get; set; } = "17";
     [ObservableProperty] public partial bool ExtendedHdlcAddress { get; set; }
-    [ObservableProperty] public partial bool UseHdlcLinkParameters { get; set; }
-    [ObservableProperty] public partial string HdlcMaxTxBytes { get; set; } = "128";
-    [ObservableProperty] public partial string HdlcMaxRxBytes { get; set; } = "128";
+    [ObservableProperty] public partial bool UseHdlcLinkParameters { get; set; } = true;
+    [ObservableProperty] public partial string HdlcMaxTxBytes { get; set; } =
+        HdlcNegotiation.MaximumInformationBytes.ToString(CultureInfo.InvariantCulture);
+    [ObservableProperty] public partial string HdlcMaxRxBytes { get; set; } =
+        HdlcNegotiation.MaximumInformationBytes.ToString(CultureInfo.InvariantCulture);
+    [ObservableProperty] public partial bool AreHdlcSizesLinked { get; set; } = true;
     [ObservableProperty] public partial int HdlcInformationFrameRetryCount { get; set; }
     [ObservableProperty] public partial string HdlcAcknowledgementTimeoutSeconds { get; set; } =
         MeterConnectionOptions.DefaultHdlcAcknowledgementTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
@@ -271,6 +274,24 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         OnPropertyChanged(nameof(CanSetSerialRts));
     }
     partial void OnFramingChanged(string value) => OnPropertyChanged(nameof(IsHdlc));
+    public string HdlcSizesLinkActionText => AreHdlcSizesLinked ? "Развязать MAX TX и MAX RX" : "Связать MAX TX и MAX RX";
+
+    partial void OnAreHdlcSizesLinkedChanged(bool value)
+    {
+        if (value) HdlcMaxRxBytes = HdlcMaxTxBytes;
+        OnPropertyChanged(nameof(HdlcSizesLinkActionText));
+    }
+
+    partial void OnHdlcMaxTxBytesChanged(string value)
+    {
+        if (AreHdlcSizesLinked) HdlcMaxRxBytes = value;
+    }
+
+    partial void OnHdlcMaxRxBytesChanged(string value)
+    {
+        if (AreHdlcSizesLinked) HdlcMaxTxBytes = value;
+    }
+
     partial void OnSelectedTraceFormatIndexChanged(int value)
     {
         trace.DisplayFormat = value switch
@@ -502,8 +523,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             ServerPhysicalAddress = importedPhysical;
             ExtendedHdlcAddress = importedExtended;
             UseHdlcLinkParameters = importedHdlcParameters is not null;
-            HdlcMaxTxBytes = (importedHdlcParameters?.MaximumTransmitInformationBytes ?? 128).ToString(CultureInfo.InvariantCulture);
-            HdlcMaxRxBytes = (importedHdlcParameters?.MaximumReceiveInformationBytes ?? 128).ToString(CultureInfo.InvariantCulture);
+            // Load both directions independently before restoring the editing link.
+            AreHdlcSizesLinked = false;
+            HdlcMaxTxBytes = (importedHdlcParameters?.MaximumTransmitInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
+            HdlcMaxRxBytes = (importedHdlcParameters?.MaximumReceiveInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
+            AreHdlcSizesLinked = HdlcMaxTxBytes == HdlcMaxRxBytes;
             HdlcInformationFrameRetryCount = importedHdlcRetryCount;
             HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
             AssociationVersion = association.GetProperty("version").GetByte().ToString(CultureInfo.InvariantCulture);
@@ -837,6 +861,21 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 Status = "Подключение отменено.";
                 trace.Add(Status);
             }
+        }
+        catch (IOException error) when (attemptedOptions?.Framing == "HDLC" &&
+                                         error.Message.Contains("exceeding the negotiated receive limit of ",
+                                             StringComparison.Ordinal))
+        {
+            trace.Add($"Счётчик превысил согласованный MAX RX: {error.Message}");
+            if (attemptedOptions.HdlcParameters is { } sizes)
+                trace.Add($"Задано клиентом: MAX TX={sizes.MaximumTransmitInformationBytes}, " +
+                          $"MAX RX={sizes.MaximumReceiveInformationBytes} байт; " +
+                          "EMCL ограничивает эти значения ответом UA счётчика.");
+            ReportError("Счётчик прислал HDLC-кадр больше согласованного MAX RX. " +
+                        "Проверьте, что включено согласование MAX TX / MAX RX и заданный MAX RX " +
+                        "не меньше полученного информационного поля. " +
+                        "Предложение клиента, ответ UA и итоговые лимиты доступны в трассировке. " +
+                        $"Диагностика: {error.Message}");
         }
         catch (IOException error) when (attemptedOptions?.Framing == "HDLC" &&
                                          error.Message.Contains("HDLC link establishment (DM)",
