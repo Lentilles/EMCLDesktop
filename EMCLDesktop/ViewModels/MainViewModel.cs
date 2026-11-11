@@ -102,6 +102,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial string Authentication { get; set; } = "High";
     [ObservableProperty] public partial string Password { get; set; } = "0000000100000001";
     [ObservableProperty] public partial string PasswordFormat { get; set; } = "UTF-8";
+    [ObservableProperty] public partial bool UseFixedInvokeC1 { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUseFixedInvokeC1))]
+    public partial bool UseHighPriority { get; set; }
+    [ObservableProperty] public partial bool IgnoreInvokeIdValidation { get; set; }
     [ObservableProperty] public partial string ConnectTimeoutSeconds { get; set; } = "10";
     [ObservableProperty] public partial string IdleTimeoutSeconds { get; set; } = "120";
     [ObservableProperty] public partial string KeepAliveIntervalSeconds { get; set; } = "20";
@@ -155,6 +160,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public bool CanSetSerialRts => SerialHandshake is not (Handshake.RequestToSend or Handshake.RequestToSendXOnXOff);
     public bool IsHdlc => Framing == "HDLC";
     public bool HasPassword => Authentication != "None";
+    public bool CanUseFixedInvokeC1 => Authentication == "High" && !UseHighPriority;
     public bool HasNoSelectedObject => SelectedObject is null;
     public string ConnectionState => IsConnecting ?
         (connectionCancellation?.IsCancellationRequested == true ? "Отмена подключения…" : "Подключение…")
@@ -204,6 +210,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     }
 
     public string GetTraceSnapshot() => trace.Snapshot();
+
+    [RelayCommand]
+    private void ClearTrace() => trace.Clear();
 
     partial void OnSelectedTabIndexChanged(int value)
     {
@@ -302,7 +311,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         };
         TraceText = trace.Snapshot();
     }
-    partial void OnAuthenticationChanged(string value) => OnPropertyChanged(nameof(HasPassword));
+    partial void OnAuthenticationChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasPassword));
+        OnPropertyChanged(nameof(CanUseFixedInvokeC1));
+    }
     private void NotifyConnectionDisplayChanged()
     {
         OnPropertyChanged(nameof(ConnectionState));
@@ -475,6 +488,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 GetString(association, "conformance", "Get, BlockTransferWithGet"), true);
             if ((importedConformance & ~LnAssociationOptions.SupportedConformance) != 0)
                 throw new ArgumentException("Конфигурация содержит неподдерживаемые флаги Conformance.");
+            bool importedUseFixedInvokeC1 = GetBool(association, "useFixedInvokeC1", false);
+            bool importedUseHighPriority = GetBool(association, "useHighPriority", false);
+            bool importedIgnoreInvokeIdValidation = GetBool(association, "ignoreInvokeIdValidation", false);
 
             string importedPassword = "";
             string importedPasswordFormat = "UTF-8";
@@ -533,6 +549,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             AssociationVersion = association.GetProperty("version").GetByte().ToString(CultureInfo.InvariantCulture);
             AssociationObis = association.GetProperty("logicalName").GetString() ?? "";
             Authentication = GetString(association, "authentication", "None");
+            UseFixedInvokeC1 = importedUseFixedInvokeC1;
+            UseHighPriority = importedUseHighPriority;
+            IgnoreInvokeIdValidation = importedIgnoreInvokeIdValidation;
             Password = importedPassword;
             PasswordFormat = importedPasswordFormat;
             ConnectTimeoutSeconds = GetDouble(connectionSettings, "connectTimeoutSeconds", 10)
@@ -626,6 +645,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     version = options.AssociationVersion,
                     logicalName = options.AssociationObis,
                     authentication = options.Authentication.ToString(),
+                    useFixedInvokeC1 = options.UseFixedInvokeC1,
+                    useHighPriority = UseHighPriority,
+                    ignoreInvokeIdValidation = options.IgnoreInvokeIdValidation,
                     password = options.PasswordFormat == "UTF-8" ? options.Password : null,
                     passwordHex = options.PasswordFormat == "Hex" ? options.Password : null,
                     passwordEnvironmentVariable = options.PasswordFormat == "Environment" ? options.Password : null,
@@ -830,6 +852,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                       $"аутентификация={attemptedOptions.Authentication}, " +
                       $"Conformance={attemptedOptions.Conformance}, " +
                       $"Max PDU={attemptedOptions.MaxReceivePduSize}; пароль скрыт");
+            string requestPriority = attemptedOptions.FixedInvokeIdAndPriority is byte fixedInvoke
+                ? $"0x{fixedInvoke:X2}"
+                : attemptedOptions.Priority.ToString();
+            trace.Add($"Приоритет запросов: {requestPriority}. " +
+                      $"Проверка Invoke ID и приоритета в ответах: {(attemptedOptions.IgnoreInvokeIdValidation ? "выключена" : "включена")}.");
             if (attemptedOptions.Framing == "HDLC")
                 trace.Add($"HDLC: повторы I-кадров={attemptedOptions.HdlcInformationFrameRetryCount}, " +
                           $"таймаут подтверждения={attemptedOptions.HdlcAcknowledgementTimeoutSeconds:g} с");
@@ -1061,7 +1088,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             HdlcInformationFrameRetryCount = IsHdlc ? HdlcInformationFrameRetryCount : 0,
             HdlcParameters = hdlcParameters,
-            HdlcAcknowledgementTimeoutSeconds = hdlcAcknowledgementTimeout
+            HdlcAcknowledgementTimeoutSeconds = hdlcAcknowledgementTimeout,
+            UseFixedInvokeC1 = UseFixedInvokeC1,
+            Priority = UseHighPriority ? InvokePriority.High : InvokePriority.Normal,
+            IgnoreInvokeIdValidation = IgnoreInvokeIdValidation
         };
         _ = options.CreateTransportFactory();
         return options;

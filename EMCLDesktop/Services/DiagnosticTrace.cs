@@ -19,7 +19,7 @@ public enum TraceDisplayFormat
 public sealed record TraceCapture(long Id, int SessionId, DateTimeOffset Timestamp, string Transport,
     string Direction, string Framing, ReadOnlyMemory<byte> Bytes);
 
-/// <summary>Captures the entire application-session exchange independently of its display format.</summary>
+/// <summary>Captures the exchange independently of its display format.</summary>
 public sealed class DiagnosticTrace
 {
     private const int BytesPerLine = 64;
@@ -27,6 +27,7 @@ public sealed class DiagnosticTrace
     private readonly List<Entry> entries = [];
     private int displayFormat;
     private long captureId;
+    private long clearedThroughCaptureId;
     private int sessionId;
     private string framing = "Auto";
 
@@ -36,6 +37,7 @@ public sealed class DiagnosticTrace
 
     public event Action? Changed;
     public int CurrentSessionId { get { lock (gate) return sessionId; } }
+    internal long ClearedThroughCaptureId { get { lock (gate) return clearedThroughCaptureId; } }
 
     public TraceDisplayFormat DisplayFormat
     {
@@ -71,6 +73,16 @@ public sealed class DiagnosticTrace
     public void Add(string message)
     {
         lock (gate) entries.Add(new(DateTimeOffset.Now, message));
+        NotifyChanged();
+    }
+
+    public void Clear()
+    {
+        lock (gate)
+        {
+            entries.Clear();
+            clearedThroughCaptureId = captureId;
+        }
         NotifyChanged();
     }
 

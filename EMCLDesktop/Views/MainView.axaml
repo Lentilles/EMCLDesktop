@@ -718,8 +718,10 @@
                                 HorizontalAlignment="Stretch" />
                         <Button Classes="secondary" Content="Сохранить трассировку" Click="SaveTraceClick"
                                 HorizontalAlignment="Stretch" />
+                        <Button Classes="secondary" Content="Очистить лог" Command="{Binding ClearTraceCommand}"
+                                HorizontalAlignment="Stretch" />
                         <TextBlock Classes="muted" FontSize="12"
-                                   Text="Весь обмен с запуска приложения. Формат применяется к просмотру, копированию и сохранению." />
+                                   Text="Формат применяется к просмотру, копированию и сохранению." />
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Classes="workspace-content" Padding="0">
@@ -738,6 +740,7 @@
                             <Button Classes="settings-navigation" Content="Адресация" Tag="Address" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Ассоциация и доступ" Tag="Association" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Параметры обмена" Tag="Exchange" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                            <Button Classes="settings-navigation" Content="Продвинутые настройки" Tag="Advanced" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                         </StackPanel>
                         <Button Classes="secondary" Content="Загрузить конфигурацию" Click="LoadConfigurationClick"
                                 HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditConfiguration}" />

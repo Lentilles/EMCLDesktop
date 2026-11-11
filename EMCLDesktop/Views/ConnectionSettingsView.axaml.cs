@@ -15,6 +15,7 @@ public partial class ConnectionSettingsView : UserControl
             "Address" => AddressSection,
             "Association" => AssociationSection,
             "Exchange" => ExchangeSection,
+            "Advanced" => AdvancedSection,
             _ => null
         };
         target?.BringIntoView();

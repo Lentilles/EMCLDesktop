@@ -73,6 +73,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     private InspectorFieldViewModel? hoveredField;
     private int dirty = 1, refreshing, liveSession = -1, bytePage, textVersion;
     private long lastCapture;
+    private long liveClearedThroughCaptureId;
     private bool disposed, liveFaulted;
     private string liveStatus = "Данные появятся при обмене с прибором.";
     private string textStatus = "Вставьте лог с HEX-пакетами и нажмите «Разобрать».";
@@ -212,11 +213,18 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         try
         {
             if (Interlocked.Exchange(ref dirty, 0) == 0) return;
+            long clearedThroughCaptureId = trace.ClearedThroughCaptureId;
             int currentSession = trace.CurrentSessionId;
             var captures = trace.CapturesAfter(lastCapture);
             int session = Math.Max(currentSession, captures.LastOrDefault()?.SessionId ?? 0);
-            bool reset = liveSession != session;
-            if (reset) { liveAnalyzer = new(); liveSession = session; liveFaulted = false; }
+            bool reset = liveSession != session || liveClearedThroughCaptureId != clearedThroughCaptureId;
+            if (reset)
+            {
+                liveAnalyzer = new();
+                liveSession = session;
+                liveClearedThroughCaptureId = clearedThroughCaptureId;
+                liveFaulted = false;
+            }
             if (liveFaulted) return;
             if (captures.Count == 0)
             {
@@ -241,8 +249,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
                 }
                 return liveAnalyzer.Snapshot();
             }, stopToken);
+            if (disposed || trace.ClearedThroughCaptureId != clearedThroughCaptureId) return;
             lastCapture = captures[^1].Id;
-            if (disposed) return;
             if (reset) { livePackets.Clear(); selections.Remove(0); }
             Reconcile(livePackets, snapshot);
             liveStatus = $"Текущее подключение · пакетов: {snapshot.Count} · обновляется при обмене. Данные остаются после отключения.";

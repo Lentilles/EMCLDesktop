@@ -47,10 +47,13 @@ public sealed class PacketAnalyzer
     public static IReadOnlyList<InspectedPacket> AnalyzeText(string text, out int ignoredLines, CancellationToken cancellationToken = default)
     {
         var analyzer = new PacketAnalyzer();
-        foreach (var input in LogTextExtractor.Extract(text, out ignoredLines))
+        ignoredLines = 0;
+        foreach (var (runs, isByteDump) in LogTextExtractor.ReadLines(text, cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            analyzer.Feed(input);
+            bool found = false;
+            foreach (var input in runs)
+                found |= analyzer.Feed(input, fromText: true, isByteDump);
+            if (!found) ignoredLines++;
         }
         analyzer.Finish();
         return analyzer.Snapshot();
@@ -58,11 +61,21 @@ public sealed class PacketAnalyzer
 
     public IReadOnlyList<InspectedPacket> Snapshot() => packets.ToArray();
 
-    public void Feed(InspectionInput input)
+    public void Feed(InspectionInput input) => Feed(input, fromText: false, isByteDump: false);
+
+    private bool Feed(InspectionInput input, bool fromText, bool isByteDump)
     {
-        if (input.Bytes.Length == 0) return;
+        if (input.Bytes.Length == 0) return false;
         string key = $"{input.SessionId}|{input.Direction}|{input.Framing}";
         if (!streams.TryGetValue(key, out var stream)) streams[key] = stream = new();
+        if (fromText && stream.Bytes is [0x7E] && input.Bytes[0] != 0x7E && (input.Bytes[0] & 0xF0) != 0xA0)
+            Consume(stream, 1);
+        if (fromText && stream.Bytes.Length > 0 && !isByteDump && input.Bytes.Length < 4 &&
+            input.Bytes[0] != 0x7E && !IsWrapperStart(input.Bytes))
+            return false;
+        if (fromText && stream.PendingId != 0 && stream.Bytes[0] is not (0 or 0x7E) &&
+            IsValidFrameStart(input.Bytes, includeWrapper: true))
+            FlushIncomplete(stream);
         // An explicit APDU label delimits a new message, unlike arbitrary transport fragments.
         if (input.ExplicitApdu && stream.Bytes.Length > 0) FlushIncomplete(stream);
         int oldLength = stream.Bytes.Length;
@@ -74,6 +87,7 @@ public sealed class PacketAnalyzer
         stream.Sources.Add(new(oldLength, input.Bytes.Length, input));
         stream.Bytes = [.. stream.Bytes, .. input.Bytes];
         int offset = 0;
+        bool found = false, aligned = true;
         while (offset < stream.Bytes.Length)
         {
             var remaining = stream.Bytes.AsSpan(offset);
@@ -85,20 +99,26 @@ public sealed class PacketAnalyzer
             }
             if (remaining[0] == 0x7E)
             {
-                if (remaining.Length < 3) break;
+                if (remaining.Length < 3 && (!fromText || (remaining[1] & 0xF0) == 0xA0)) break;
+                if (fromText && (remaining[1] & 0xF0) != 0xA0)
+                {
+                    offset++;
+                    continue;
+                }
                 int length = ((remaining[1] & 7) << 8) | remaining[2];
                 if ((remaining[1] & 0xF0) == 0xA0 && length >= 7)
                 {
+                    found = aligned = true;
                     if (remaining.Length < length + 2 || remaining[length + 1] != 0x7E)
                     {
-                        int recovered = FindValidHdlcStart(remaining);
+                        int recovered = FindValidFrameStart(stream.Bytes.AsMemory(offset), includeWrapper: fromText);
                         if (recovered > 0)
                         {
                             Put(MakePacket(stream, offset, recovered, "HDLC") with
                             {
                                 Kind = "HDLC · повреждённая длина / обрыв", HasError = true,
-                                Diagnostic = "Перед следующим кадром с корректной CRC обнаружены неполные или повреждённые данные.",
-                                Fields = [InspectionField.At("Повреждённый фрагмент", "Граница восстановлена по следующему корректному HDLC-кадру", 0, recovered)]
+                                Diagnostic = "Перед следующим корректным кадром обнаружены неполные или повреждённые данные.",
+                                Fields = [InspectionField.At("Повреждённый фрагмент", "Граница восстановлена по следующему корректному кадру", 0, recovered)]
                             });
                             offset += recovered;
                             continue;
@@ -110,54 +130,92 @@ public sealed class PacketAnalyzer
                     offset += length + 1; // Closing flag can also open the next frame.
                     continue;
                 }
+                if (fromText && !isByteDump)
+                {
+                    offset++;
+                    aligned = false;
+                    continue;
+                }
                 int next = remaining[1..].IndexOf((byte)0x7E);
-                int badLength = next >= 0 ? next + 1 : remaining.Length;
+                int recoveredStart = fromText ? FindValidFrameStart(stream.Bytes.AsMemory(offset), includeWrapper: true) : -1;
+                int badLength = recoveredStart > 0 ? recoveredStart : next >= 0 ? next + 1 : remaining.Length;
                 Put(MakePacket(stream, offset, badLength, "HDLC") with
                 {
                     Kind = "HDLC · неверный заголовок", HasError = true,
                     Diagnostic = "Ожидался HDLC format type 3 с допустимой длиной.",
                     Fields = [InspectionField.At("Неразобранный HDLC", "Неверный заголовок", 0, badLength)]
                 });
+                found = true;
                 offset += badLength;
                 continue;
             }
             bool wrapperHint = input.Framing == "Wrapper";
-            if (wrapperHint || remaining[0] == 0 && (remaining.Length == 1 || remaining[1] == 1))
+            if (wrapperHint || IsWrapperStart(remaining) || remaining.Length == 1 && remaining[0] == 0 &&
+                (!fromText || aligned && isByteDump && !found))
             {
-                if (remaining.Length < 8) break;
+                if (remaining.Length < 8 && (!fromText || aligned && isByteDump)) break;
+                if (remaining.Length < 8) { offset++; aligned = false; continue; }
                 int length = BinaryPrimitives.ReadUInt16BigEndian(remaining[6..]);
-                if (remaining[0] == 0 && remaining[1] == 1)
+                if (IsWrapperStart(remaining) && (!fromText || length > 0 && (
+                    aligned && isByteDump || remaining.Length > 8 && IsApduStart(remaining[8]))))
                 {
-                    if (remaining.Length < 8 + length) break;
+                    if (remaining.Length < 8 + length)
+                    {
+                        int recovered = fromText ? FindValidFrameStart(stream.Bytes.AsMemory(offset), includeWrapper: true) : -1;
+                        if (recovered < 0) break;
+                        if (aligned && isByteDump || stream.PendingId != 0)
+                        {
+                            Put(MakePacket(stream, offset, recovered, "Wrapper") with
+                            {
+                                Kind = "Wrapper · повреждённая длина / обрыв", HasError = true, IsIncomplete = true,
+                                Diagnostic = "Граница восстановлена по следующему корректному кадру.",
+                                Fields = [InspectionField.At("Доступные байты", "Неполный пакет", 0, recovered)]
+                            });
+                            found = true;
+                        }
+                        offset += recovered;
+                        aligned = true;
+                        continue;
+                    }
                     ReadWrapper(MakePacket(stream, offset, 8 + length, "Wrapper"), input.SessionId);
+                    found = aligned = true;
                     offset += 8 + length;
                     continue;
                 }
             }
-            if (input.Framing is not ("HDLC" or "Wrapper") && IsApduStart(remaining[0]))
+            if (input.Framing is not ("HDLC" or "Wrapper") && (!fromText || aligned))
             {
-                var decoded = new ApduCodec().Decode(new ReadOnlySequence<byte>(stream.Bytes.AsMemory(offset)));
-                if (decoded.Status == DecodeStatus.NeedMoreData) break;
-                int count = decoded.Status == DecodeStatus.Done ? checked((int)decoded.Consumed) : remaining.Length;
-                var packet = MakePacket(stream, offset, count, "APDU");
-                ReadApdu(packet, MappedPayload.Contiguous(packet.Bytes, 0, count), Scope(input.SessionId, "APDU"),
-                    Sender(input.Direction), []);
-                offset += count;
-                continue;
-            }
-            if (input.Framing is not ("HDLC" or "Wrapper") && remaining[0] is 0xE6 or 0xFF)
-            {
-                if (remaining.Length < 4) break;
-                if (remaining[1] is 0xE6 or 0xE7 && remaining[2] == 0)
+                bool startsLlc = remaining[0] is 0xE6 or 0xFF;
+                if (startsLlc && remaining.Length < 4 && !fromText) break;
+                bool hasLlc = remaining.Length >= 4 && LlcDirection(remaining) != "?";
+                if (hasLlc || IsApduStart(remaining[0]))
                 {
-                    var decoded = new ApduCodec().Decode(new ReadOnlySequence<byte>(stream.Bytes.AsMemory(offset + 3)));
+                    int headerLength = hasLlc ? 3 : 0;
+                    var decoded = new ApduCodec().Decode(new ReadOnlySequence<byte>(stream.Bytes.AsMemory(offset + headerLength)));
+                    bool allowPartial = isByteDump || stream.PendingId != 0;
+                    if (fromText && decoded.Status != DecodeStatus.Done && (!allowPartial || found))
+                    {
+                        offset++;
+                        aligned = false;
+                        continue;
+                    }
                     if (decoded.Status == DecodeStatus.NeedMoreData) break;
-                    int count = decoded.Status == DecodeStatus.Done ? checked((int)decoded.Consumed) + 3 : remaining.Length;
-                    var packet = MakePacket(stream, offset, count, "LLC / APDU");
-                    ReadLlc(packet, MappedPayload.Contiguous(packet.Bytes, 0, count), Scope(input.SessionId, "APDU"), Sender(input.Direction), []);
+                    int count = decoded.Status == DecodeStatus.Done ? checked((int)decoded.Consumed) + headerLength : remaining.Length;
+                    var packet = MakePacket(stream, offset, count, hasLlc ? "LLC / APDU" : "APDU");
+                    var payload = MappedPayload.Contiguous(packet.Bytes, 0, count);
+                    string scope = Scope(input.SessionId, "APDU");
+                    if (hasLlc) ReadLlc(packet, payload, scope, input.Direction, []);
+                    else ReadApdu(packet, payload, scope, input.Direction, []);
+                    found = true;
                     offset += count;
                     continue;
                 }
+            }
+            if (fromText)
+            {
+                aligned = false;
+                offset++;
+                continue;
             }
             int noiseLength = 1;
             while (noiseLength < remaining.Length && remaining[noiseLength] != 0x7E &&
@@ -171,6 +229,8 @@ public sealed class PacketAnalyzer
             offset += noiseLength;
         }
         Consume(stream, offset);
+        if (fromText && stream.Bytes.Length == 1 && stream.Bytes[0] == 0x7E)
+            return found || isByteDump;
         if (stream.Bytes.Length > 1 || stream.Bytes.Length == 1 && stream.Bytes[0] != 0x7E)
         {
             var pending = MakePacket(stream, 0, stream.Bytes.Length, input.Framing);
@@ -181,7 +241,9 @@ public sealed class PacketAnalyzer
                 Diagnostic = "Не хватает байтов; ожидается продолжение.",
                 Fields = [InspectionField.At("Доступные байты", "Неполный пакет", 0, pending.Bytes.Length)]
             });
+            found = true;
         }
+        return found;
     }
 
     public void Finish()
@@ -244,6 +306,24 @@ public sealed class PacketAnalyzer
         }
         string scope = Scope(session, $"HDLC:{Pair(source.Key, destination.Key)}");
         string segmentKey = $"{scope}|{source.Key}";
+        segments.TryGetValue(segmentKey, out var transfer);
+        if (packet.Direction == "?")
+        {
+            string direction = (control & 0xEF) switch
+            {
+                0x83 or 0x43 => "TX", // SNRM / DISC
+                0x63 or 0x0F or 0x87 => "RX", // UA / DM / FRMR
+                _ => "?"
+            };
+            if (frame.IsInformation || frame.IsUnnumberedInformation)
+                direction = transfer is null ? LlcDirection(frame.Information.AsSpan()) : transfer.Parts[0].Packet.Direction;
+            if (direction == "?")
+            {
+                if (frame.Source.Length == 1 && frame.Destination.Length > 1) direction = "TX";
+                else if (frame.Destination.Length == 1 && frame.Source.Length > 1) direction = "RX";
+            }
+            packet = packet with { Direction = direction };
+        }
         if (!frame.IsInformation && !frame.IsUnnumberedInformation)
         {
             if ((control & 0xEF) is 0x83 or 0x43 or 0x63)
@@ -257,7 +337,7 @@ public sealed class PacketAnalyzer
             return;
         }
         var payload = MappedPayload.Contiguous(bytes, infoStart, frame.Information.Length);
-        if (!segments.TryGetValue(segmentKey, out var transfer) && !frame.Segmented)
+        if (transfer is null && !frame.Segmented)
         {
             ReadLlc(packet, payload, scope, source.Key, [hdlc]);
             return;
@@ -311,12 +391,13 @@ public sealed class PacketAnalyzer
 
     private void ReadLlc(InspectedPacket packet, MappedPayload payload, string scope, string sender, IReadOnlyList<InspectionField> outer)
     {
-        if (payload.Bytes.Length < 3 || payload.Bytes[0] is not (0xE6 or 0xFF) ||
-            payload.Bytes[1] is not (0xE6 or 0xE7) || payload.Bytes[2] != 0)
+        string direction = LlcDirection(payload.Bytes);
+        if (direction == "?")
         {
             Put(packet with { HasError = true, Diagnostic = "Нет корректного LLC-заголовка; возможно, начало APDU отсутствует в логе.", Fields = outer });
             return;
         }
+        if (packet.Direction == "?") packet = packet with { Direction = direction };
         var llc = payload.Field("LLC", payload.Bytes[1] == 0xE7 ? "response" : "command", 0, 3,
             payload.Field("Destination LSAP", $"0x{payload.Bytes[0]:X2}", 0, 1),
             payload.Field("Source LSAP", $"0x{payload.Bytes[1]:X2}", 1, 1),
@@ -332,6 +413,8 @@ public sealed class PacketAnalyzer
             return;
         }
         var inspection = ApduFieldDecoder.Decode(payload);
+        if (packet.Direction == "?") packet = packet with { Direction = ApduDirection(payload.Bytes[0]) };
+        if (sender == "?") sender = packet.Direction;
         packet = packet with { Kind = inspection.Kind, Fields = [.. outer, inspection.Field],
             Diagnostic = inspection.Diagnostic, HasError = inspection.HasError };
         switch (inspection.Apdu)
@@ -595,20 +678,41 @@ public sealed class PacketAnalyzer
     private static string Join(string first, string second) => string.IsNullOrEmpty(first) ? second : $"{first} {second}";
     private static string Scope(int session, string channel) => $"{session}:{channel}";
     private static string Pair(string a, string b) => string.CompareOrdinal(a, b) < 0 ? $"{a}/{b}" : $"{b}/{a}";
-    private static string Sender(string direction) => direction;
     private static string RequestKey(string scope, CosemOperationKind kind, byte invoke) => $"{scope}|{kind}|{invoke & 15}";
-    private static bool IsApduStart(byte value) => value is 1 or 8 or 0x0F or >= 0x60 and <= 0x63 or 0xC0 or 0xC1 or 0xC3 or 0xC4 or 0xC5 or 0xC7 or 0xDB or 0xDC or 0xC8 or 0xCC;
-    private static int FindValidHdlcStart(ReadOnlySpan<byte> data)
+    private static bool IsWrapperStart(ReadOnlySpan<byte> bytes) => bytes is [0, 1, ..];
+    private static string LlcDirection(ReadOnlySpan<byte> bytes) => bytes switch
     {
-        for (int i = 1; i < data.Length - 3; i++)
-        {
-            if (data[i] != 0x7E || (data[i + 1] & 0xF0) != 0xA0) continue;
-            int length = ((data[i + 1] & 7) << 8) | data[i + 2];
-            if (length < 7 || length + 2 > data.Length - i || data[i + length + 1] != 0x7E) continue;
-            if (new HdlcCodec().Decode(new ReadOnlySequence<byte>(data.Slice(i, length + 2).ToArray())).Status == DecodeStatus.Done)
-                return i;
-        }
+        [0xE6 or 0xFF, 0xE6, 0, ..] => "TX",
+        [0xE6 or 0xFF, 0xE7, 0, ..] => "RX",
+        _ => "?"
+    };
+    private static string ApduDirection(byte tag) => tag switch
+    {
+        0x01 or 0x60 or 0x62 or 0xC0 or 0xC1 or 0xC3 or 0x21 or 0xC8 or 0xC9 or 0xCB or 0xD0 or 0xD1 or 0xD3 => "TX",
+        0x08 or 0x0F or 0x61 or 0x63 or 0xC4 or 0xC5 or 0xC7 or 0x28 or 0xCC or 0xCD or 0xCF or 0xD4 or 0xD5 or 0xD7 => "RX",
+        _ => "?"
+    };
+    private static bool IsApduStart(byte tag) => ApduDirection(tag) != "?" || tag is 0x25 or 0xDB or 0xDC;
+    private static int FindValidFrameStart(ReadOnlyMemory<byte> bytes, bool includeWrapper)
+    {
+        for (int i = 1; i < bytes.Length - 3; i++)
+            if (IsValidFrameStart(bytes[i..], includeWrapper)) return i;
         return -1;
+    }
+    private static bool IsValidFrameStart(ReadOnlyMemory<byte> bytes, bool includeWrapper)
+    {
+        var data = bytes.Span;
+        if (data.Length >= 9 && data[0] == 0x7E && (data[1] & 0xF0) == 0xA0)
+        {
+            int length = ((data[1] & 7) << 8) | data[2];
+            return length >= 7 && length + 2 <= data.Length && data[length + 1] == 0x7E &&
+                new HdlcCodec().Decode(new ReadOnlySequence<byte>(bytes[..(length + 2)])).Status == DecodeStatus.Done;
+        }
+        if (!includeWrapper || data.Length <= 8 || !IsWrapperStart(data) || !IsApduStart(data[8])) return false;
+        int payloadLength = BinaryPrimitives.ReadUInt16BigEndian(data[6..]);
+        if (payloadLength == 0 || payloadLength > data.Length - 8) return false;
+        var decoded = new ApduCodec().Decode(new ReadOnlySequence<byte>(bytes.Slice(8, payloadLength)));
+        return decoded.Status == DecodeStatus.Done && decoded.Consumed == payloadLength;
     }
     private static ushort ReadCrc(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset));
     private static string ControlName(byte control) => (control & 0xEF) switch

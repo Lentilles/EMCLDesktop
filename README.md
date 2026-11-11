@@ -21,7 +21,7 @@ On macOS, the **EMCL Desktop** application menu includes About and Connection se
 
 ## Running from source
 
-.NET SDK 10 is required. The application uses the EMCL 0.1.1 NuGet package; its version is pinned in `Directory.Packages.props`. A local EMCL checkout is not required to build or run the application.
+.NET SDK 10 is required. The application uses the EMCL 0.3.1 NuGet package, pinned in `Directory.Packages.props`.
 
 Run these commands from the `EMCLDesktop` repository root:
 
@@ -112,8 +112,15 @@ Selecting an object does not read its values. A saved catalog remains visible af
 | Association | Client and server addresses, Association LN version, association OBIS, Conformance, maximum PDU size |
 | Authentication | `None`, `Low`, `High`; password as UTF-8, HEX, or an environment variable name |
 | Communication | Connection timeout, No traffic interval, KeepAlive, handling of identical `object_list` entries |
+| Advanced | Fixed Invoke-Id-And-Priority octet, high request priority, acceptance of mismatched response octets |
 
 `High` authentication requires a 16-byte secret. All supported Conformance flags are enabled by default and can be toggled individually; loading a JSON configuration restores them from the file. Reading the association requires `Get`; `High` authentication also requires `Action`.
+
+- **High request priority** sets bit `0x80` on requests and keeps the automatically allocated Invoke IDs. Enable `PriorityManagement` in Conformance and ensure the meter negotiates it.
+- **Fixed Invoke ID and priority (0xC1)** is a compatibility option that sends `0xC1` during `High` authentication and on later requests. It applies when explicitly enabled with `High` authentication and high request priority turned off.
+- **Accept responses with a different Invoke ID or priority** allows a mismatch during HLS and subsequent exchanges, including GET and SET block transfers. The application sends one request at a time and EMCL checks the response service, block sequence, and HLS challenge.
+
+JSON profiles store these settings as `association.useFixedInvokeC1`, `association.useHighPriority`, and `association.ignoreInvokeIdValidation`. Each setting defaults to off, including when loading profiles without its field.
 
 Serial uses direct binary communication at the configured baud rate, without an initial IEC 62056-21 exchange or baud rate switching. Hardware handshaking controls RTS automatically. TCP and Serial settings remain in their fields when switching transports; JSON stores the settings for the selected transport.
 
@@ -123,7 +130,7 @@ For HDLC, set **Unacknowledged frame retries** to `1` to enable recovery. After 
 
 **Negotiate MAX TX / MAX RX** (`Согласовывать MAX TX / MAX RX`) is enabled for new connections and proposes the maximum supported sizes, **2030 / 2030 bytes**, for the next HDLC connection. TX is transmission from the application; RX is reception by the application. Each value accepts `3–2030` bytes including LLC. The chain button between the fields links their edits in both directions and is enabled by default. Turning it on copies TX to RX; turn it off to enter different values. Loading equal sizes links the fields; loading different sizes unlinks them and preserves both values. The application uses one-frame TX/RX windows. The trace records the client proposal, the meter's UA values and the effective client limits, which may be smaller than requested. Disabling the option preserves empty SNRM behavior. Older configurations load with this option disabled. JSON stores enabled proposals under `channel.framing.hdlcLinkParameters`; Wrapper configurations omit them. This setting is independent of Max PDU.
 
-If a meter sends an HDLC frame larger than its negotiated limit during connection, the application closes the failed connection and reports the size violation explicitly. Check the negotiation trace and enable explicit MAX TX / MAX RX with a sufficiently large RX. For example, an empty SNRM leaves the application's local limit at 128 bytes even if UA advertises 571; proposing TX=571 / RX=571 allows 571-byte information fields when UA also advertises 571 in both directions. Configured values are proposals: EMCL 0.2.3 still applies the smaller limits returned in UA. Overriding an incorrectly low UA requires an EMCL compatibility API that is not currently available.
+If a meter sends an HDLC frame larger than its negotiated limit during connection, the application closes the failed connection and reports the size violation explicitly. Check the negotiation trace and enable explicit MAX TX / MAX RX with a sufficiently large RX. For example, an empty SNRM leaves the application's local limit at 128 bytes even if UA advertises 571. Proposing TX=571 / RX=571 allows 571-byte information fields when UA also advertises 571 in both directions. EMCL applies the smaller limits returned in UA. Overriding an incorrectly low UA requires an EMCL compatibility API that is not currently available.
 
 By default, **KeepAlive** reads the Association LN object's `logical_name` with a short GET request after 20 seconds of inactivity. The interval can be configured from 1 to 3600 seconds. No extra requests are sent while reading attributes or profiles. If the session is lost, the application displays an error, closes the connection, and allows you to reconnect.
 
@@ -174,7 +181,7 @@ With UTF-8 or HEX passwords, the password is stored in JSON without encryption. 
 The **Packet inspector** tab has two independent sources:
 
 - **Analyze current connection** passively parses captured TCP/Serial bytes from the most recent connection. Frames are reconstructed independently of transport read boundaries. Results remain available after disconnecting; a new connection starts a separate analysis. Decoding runs in the background while the tab is open, and capture continues on every tab.
-- **Analyze text** parses a pasted log when you click **Parse**. Supported input includes spaced HEX, contiguous HEX, `0xNN`, TX/RX, SEND/RECV, and direction arrows. Timestamps, sizes, and offsets from the application's own exports are excluded from the payload. Unrelated lines are skipped and counted in the results. The input field collapses after successful parsing.
+- **Analyze text** parses a pasted log when you click **Parse**. It accepts spaced HEX, contiguous HEX, and `0xNN` bytes. It locates HDLC frames by flags and frame length, and Wrapper messages by the version 1 header and payload length. Standalone DLMS APDUs are also supported. TX/RX is inferred from the packet bytes and shown as `?` when ambiguous. Timestamps, sizes, and offsets from the application's exports are excluded from the payload. Unrelated lines are skipped and counted in the results. The input field collapses after successful parsing.
 
 Text, results, and packet/field selections are preserved when switching sources. Packets and the HDLC / Wrapper / LLC / ACSE / DLMS / A-XDR field tree appear on the left; HEX and links to related packets appear on the right. The original packet text is available at the bottom.
 
@@ -188,7 +195,7 @@ Limits per analysis: `16 × 1024 × 1024` text characters, 50,000 entries, 1 MiB
 
 ## Tracing and export
 
-The **Tracing and export** tab shows communication history since application startup. Capture begins before HDLC/association setup, continues regardless of the active tab or display format, and is preserved across reconnections. You can copy the trace or use **Save trace** to export it to `.txt`.
+The **Tracing and export** tab shows recorded communication. Capture begins before HDLC/association setup, continues regardless of the active tab or display format, and is preserved across reconnections. You can copy the trace or use **Save trace** to export it to `.txt`. **Clear log** removes the recorded trace and resets the live packet inspector while capture continues.
 
 The selected format applies to the entire recorded history, clipboard copying, and saving:
 
@@ -200,7 +207,7 @@ The selected format applies to the entire recorded history, clipboard copying, a
 
 A send attempt is recorded before writing to the transport; successful completion is recorded separately. If a write fails, the prefix actually sent is unknown. Transport read boundaries may differ from packet boundaries.
 
-Both HEX modes show the raw exchange without masking, including transmitted passwords and keys. The log remains in memory without truncation until the application closes, so memory usage grows with traffic volume.
+Both HEX modes show the raw exchange without masking, including transmitted passwords and keys. The log remains in memory without truncation until it is cleared or the application closes.
 
 ## Limitations
 

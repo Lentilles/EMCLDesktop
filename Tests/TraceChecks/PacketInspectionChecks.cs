@@ -27,13 +27,14 @@ internal static class PacketInspectionChecks
         byte[] FieldBytes(InspectedPacket packet, InspectionField field) => field.Ranges.SelectMany(r => packet.Bytes.Skip(r.Offset).Take(r.Length)).ToArray();
         InspectedPacket[] Analyze(string text) => PacketAnalyzer.AnalyzeText(text, out _).ToArray();
         string Hex(byte[] bytes) => string.Join(' ', bytes.Select(b => b.ToString("X2")));
-        byte[] Hdlc(byte[] information, bool rx = false, bool segmented = false, byte sequence = 0)
+        byte[] Hdlc(byte[] information, bool rx = false, bool segmented = false, byte sequence = 0, byte? control = null,
+            bool oneByteServer = false)
         {
             var writer = new ArrayBufferWriter<byte>();
             var client = HdlcAddress.Client(48);
-            var server = HdlcAddress.Server(1, 17);
+            var server = oneByteServer ? HdlcAddress.Server(1) : HdlcAddress.Server(1, 17);
             new HdlcCodec().Encode(new(rx ? client : server, rx ? server : client,
-                (byte)(sequence << 1), information.ToImmutableArray(), segmented), writer);
+                control ?? (byte)(sequence << 1), information.ToImmutableArray(), segmented), writer);
             return writer.WrittenSpan.ToArray();
         }
         byte[] Wrapper(byte[] apdu, bool rx = false) => [0, 1, 0, rx ? (byte)1 : (byte)48, 0, rx ? (byte)48 : (byte)1,
@@ -54,12 +55,28 @@ internal static class PacketInspectionChecks
         var sameLine = Analyze($"TX: {Hex(request)} RX: {Hex(response)}");
         Check(sameLine.Length == 2 && sameLine[1].Target is not null, "two directions on the same line");
         var unknownDirection = Analyze($"{Hex(request)}\n{Hex(response)}");
-        Check(unknownDirection[1].Target is not null, "directionless raw APDU correlation");
+        Check(unknownDirection[0].Direction == "TX" && unknownDirection[1].Direction == "RX" &&
+            unknownDirection[1].Target is not null, "raw APDU direction and correlation");
+        var splitApdu = Analyze($"{Hex(request[..6])}\n{Hex(request[6..])}\n{Hex(response)}");
+        Check(splitApdu.Length == 2 && splitApdu[0].Bytes.SequenceEqual(request) && splitApdu[1].Target is not null,
+            "standalone APDU split across lines");
 
         var sourceTrace = new DiagnosticTrace();
         sourceTrace.BeginConnection("HDLC");
         byte[] txFrame = Hdlc([0xE6, 0xE6, 0, .. request]);
         byte[] rxFrame = Hdlc([0xE6, 0xE7, 0, .. response], true);
+        var noisy = PacketAnalyzer.AnalyzeText(
+            $"2026-11-11 19:42:12.123 +03:00 counters: DE AD BE EF CAFE 1234\n" +
+            $"RX packet: FE ED {Hex(txFrame)} counter 99 TX packet: {Convert.ToHexString(rxFrame)} | DE AD BE EF |\n" +
+            "duration: 30 ms, checksum DEADBEEF", out int ignored);
+        Check(ignored == 2 && noisy.Count == 2 && noisy[0].Bytes.SequenceEqual(txFrame) &&
+            noisy[1].Bytes.SequenceEqual(rxFrame), "surrounding text or unrelated HEX changed the selected frames");
+        Check(noisy[0].Direction == "TX" && noisy[1].Direction == "RX" && noisy[1].Target is not null,
+            "HDLC direction or context depended on log labels");
+        var linkSetup = Analyze(Hex([.. Hdlc([], control: 0x93, oneByteServer: true),
+            .. Hdlc([], rx: true, control: 0x73, oneByteServer: true), .. Hdlc([], control: 0x11, oneByteServer: true)]));
+        Check(linkSetup.Select(p => p.Direction).SequenceEqual(["TX", "RX", "?"]),
+            "HDLC direction without LLC or a compound address");
         sourceTrace.LogTcpBytes("TX", txFrame.AsSpan(0, 8));
         sourceTrace.LogTcpBytes("TX", txFrame.AsSpan(8));
         sourceTrace.LogTcpBytes("RX", rxFrame);
@@ -97,6 +114,22 @@ internal static class PacketInspectionChecks
         var wrapped = Analyze($"TX: {Hex(Wrapper(request))}\nRX: {Hex(Wrapper(response, true))}");
         Check(wrapped.Length == 2 && wrapped[1].Target is not null, "Wrapper decode and correlation");
         Check(FieldBytes(wrapped[0], Field(wrapped[0], "OBIS / logical name")).SequenceEqual(obis), "Wrapper/APDU offset mapping");
+        byte[] txWrapper = Wrapper(request);
+        byte[] rxWrapper = Wrapper(response, true);
+        var mixed = Analyze($"19:42:12.123 payload: {Hex(txFrame)} note: {Hex([.. txWrapper, .. rxWrapper])} tail AB CD");
+        Check(mixed.Length == 3 && mixed[1].Direction == "TX" && mixed[2].Direction == "RX" &&
+            mixed[1].Bytes.SequenceEqual(txWrapper) && mixed[2].Bytes.SequenceEqual(rxWrapper),
+            "mixed framing, adjacent Wrapper messages or trailing HEX");
+        var splitWrapper = Analyze($"00000000: {Hex(txWrapper[..6])}\n" +
+            $"unrelated text\n00000006: {Hex(txWrapper[6..])}\n" +
+            $"TX: {Hex(rxWrapper).Replace(' ', ':')}");
+        Check(splitWrapper.Length == 2 && splitWrapper[0].Bytes.SequenceEqual(txWrapper) &&
+            splitWrapper[1].Bytes.SequenceEqual(rxWrapper) && splitWrapper[1].Direction == "RX" &&
+            splitWrapper[1].Target is not null, "Wrapper fragment reconstruction or colon-separated HEX");
+        var badWrapper = txWrapper.ToArray(); badWrapper[6] = 0xFF;
+        var wrapperRecovered = Analyze($"payload: {Hex(badWrapper)}\nnext packet: {Hex(txWrapper)}");
+        Check(wrapperRecovered.Length == 2 && wrapperRecovered[0].HasError && !wrapperRecovered[1].HasError &&
+            wrapperRecovered[1].Bytes.SequenceEqual(txWrapper), "corrupt Wrapper length swallowed the next valid frame");
 
         byte[] llc = [0xE6, 0xE6, 0, .. request];
         byte[] segment1 = Hdlc(llc[..11], segmented: true);
@@ -144,8 +177,13 @@ internal static class PacketInspectionChecks
         Check(restarted[^1].Target is null, "request leaked across connections");
         var wrongPeer = Analyze($"TX: {Hex(Wrapper(request))}\nRX: {Hex(new byte[] { 0, 1, 0, 2, 0, 48, 0, 7 }.Concat(response).ToArray())}");
         Check(wrongPeer[^1].Target is null, "request leaked across peer addresses");
-        var sameDirection = Analyze($"TX: {Hex(request)}\nTX: {Hex(response)}");
-        Check(sameDirection[^1].Target is null, "same-direction response matched");
+        var wrongLabels = Analyze($"RX: {Hex(request)}\nRX: {Hex(response)}");
+        Check(wrongLabels[0].Direction == "TX" && wrongLabels[1].Direction == "RX" && wrongLabels[1].Target is not null,
+            "text direction labels overrode APDU tags");
+        var sameDirection = new PacketAnalyzer();
+        sameDirection.Feed(new(request, "TX", "APDU"));
+        sameDirection.Feed(new(response, "TX", "APDU"));
+        Check(sameDirection.Snapshot()[^1].Target is null, "same-direction response in a live capture matched");
 
         var denied = Analyze($"TX: {Hex(request)}\nRX: C4 01 C1 01 03");
         Check(denied[^1].HasError && denied[^1].Target is not null && denied[^1].DataValue is null, "access error decoded as a value");
@@ -154,7 +192,8 @@ internal static class PacketInspectionChecks
         var action = Analyze("TX: C3 01 C1 00 0F 00 00 28 00 00 FF 01 01 09 02 01 02\nRX: C7 01 C1 00 01 00 11 01");
         Check(action[^1].Target?.IsMethod == true && action[^1].DataValue?.AsInt64() == 1 && !action[^1].HasError, "ACTION parameter/return data");
         var secured = Analyze("RX: DB 05 01 02 03 04 05");
-        Check(secured.Length == 1 && secured[0].DataValue is null && secured[0].Diagnostic.Contains("зашифровано"), "ciphertext presented as values");
+        Check(secured.Length == 1 && secured[0].Direction == "?" && secured[0].DataValue is null &&
+            secured[0].Diagnostic.Contains("зашифровано"), "generic ciphertext invented direction or values");
 
         byte[] scalerRequest = request.ToArray(); scalerRequest[11] = 3;
         var scaled = Analyze($"TX: {Hex(scalerRequest)}\nRX: C4 01 C1 00 02 02 0F FF 16 23\nTX: {Hex(request)}\nRX: {Hex(response)}");

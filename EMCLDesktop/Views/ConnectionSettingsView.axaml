@@ -276,6 +276,32 @@
                 </StackPanel>
             </Border>
 
+            <Border x:Name="AdvancedSection" Classes="settings-section">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Продвинутые настройки" Classes="section-title" />
+                    <StackPanel>
+                        <CheckBox Content="Высокий приоритет запросов"
+                                  IsChecked="{Binding UseHighPriority}" />
+                        <TextBlock Text="Устанавливает бит 0x80 и сохраняет обычную нумерацию запросов. Требует согласования PriorityManagement."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel>
+                        <CheckBox IsEnabled="{Binding CanUseFixedInvokeC1}"
+                                  IsChecked="{Binding UseFixedInvokeC1}">
+                            <TextBlock Text="Фиксированный Invoke ID и приоритет (0xC1)" TextWrapping="Wrap" />
+                        </CheckBox>
+                        <TextBlock Text="Режим совместимости для счётчиков, которые ожидают 0xC1. Доступен при аутентификации High с выключенным высоким приоритетом запросов."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel>
+                        <CheckBox IsChecked="{Binding IgnoreInvokeIdValidation}">
+                            <TextBlock Text="Принимать ответы с другим Invoke ID или приоритетом" TextWrapping="Wrap" />
+                        </CheckBox>
+                        <TextBlock Text="Включите, если счётчик возвращает другое поле Invoke-Id-And-Priority. Тип ответа, порядок блоков и подтверждение HLS продолжают проверяться."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

@@ -64,6 +64,20 @@ trace.LogTcpBytes("TX", [1, 2]);
 trace.DisplayFormat = TraceDisplayFormat.HexOnly;
 Check(Tokens(trace).SequenceEqual(Hex([.. tx, .. rx, 1, 2])), "Reconnect discarded or changed history");
 
+var lastCapture = trace.CapturesAfter(0)[^1];
+bool clearNotified = false;
+trace.Changed += () => clearNotified = trace.Snapshot() == "";
+trace.Clear();
+Check(clearNotified, "Clearing the trace did not notify the display");
+Check(trace.DisplayFormat == TraceDisplayFormat.HexOnly && trace.Snapshot() == "",
+    "Clearing the trace retained raw data or changed the format");
+trace.DisplayFormat = TraceDisplayFormat.Verbal;
+Check(trace.Snapshot() == "" && trace.CapturesAfter(0).Count == 0, "Clearing the trace retained old entries");
+trace.LogTcpBytes("RX", rx);
+var nextCapture = trace.CapturesAfter(lastCapture.Id).Single();
+Check(nextCapture.SessionId == lastCapture.SessionId && nextCapture.Framing == lastCapture.Framing,
+    "Clearing the trace interrupted capture or changed its connection metadata");
+
 // Chunk boundaries and byte order remain exact in both formats, including long chunks.
 byte[] large = Enumerable.Range(0, 150).Select(n => (byte)n).ToArray();
 var chunks = new DiagnosticTrace { DisplayFormat = TraceDisplayFormat.HexOnly };
@@ -183,6 +197,12 @@ vm.Host = "";
 vm.TcpPort = "unused";
 vm.HdlcInformationFrameRetryCount = 1;
 vm.HdlcAcknowledgementTimeoutSeconds = "0.75";
+vm.Authentication = "High";
+Check(!vm.UseFixedInvokeC1 && vm.CanUseFixedInvokeC1, "The fixed 0xC1 mode should be opt-in for High authentication");
+Check(!vm.UseHighPriority && !vm.IgnoreInvokeIdValidation, "High priority and Invoke ID compatibility should be opt-in");
+vm.UseHighPriority = true;
+Check(!vm.CanUseFixedInvokeC1, "High priority should use automatic Invoke IDs");
+vm.IgnoreInvokeIdValidation = true;
 await using var serialJson = new MemoryStream();
 await vm.SaveConfigurationAsync(serialJson);
 Check(!vm.HasStatusError, "Successful save retained stale error-copy action");
@@ -204,6 +224,24 @@ Check(restored.IsSerial && restored.SerialPortName == vm.SerialPortName && resto
     "Serial JSON round trip lost settings: " + restored.Status);
 Check(restored.HdlcInformationFrameRetryCount == 1 && restored.HdlcAcknowledgementTimeoutSeconds == "0.75",
     "HDLC recovery settings did not round trip");
+Check(!restored.UseFixedInvokeC1 && restored.Authentication == "High", "Disabled fixed 0xC1 setting did not round trip");
+Check(restored.UseHighPriority && restored.IgnoreInvokeIdValidation,
+    "High request priority or Invoke ID compatibility setting did not round trip");
+var savedAssociation = savedSerial["association"]!.AsObject();
+savedAssociation["useFixedInvokeC1"] = true;
+await restored.LoadConfigurationAsync(new MemoryStream(Encoding.UTF8.GetBytes(savedSerial.ToJsonString())));
+Check(restored.UseFixedInvokeC1 && restored.UseHighPriority && !restored.CanUseFixedInvokeC1,
+    "High priority should take precedence over a saved fixed 0xC1 setting");
+restored.UseHighPriority = false;
+Check(restored.CanUseFixedInvokeC1, "Fixed 0xC1 should be available for High authentication with normal priority");
+restored.Authentication = "Low";
+Check(!restored.CanUseFixedInvokeC1, "Fixed 0xC1 should only be available for High authentication");
+savedAssociation.Remove("useFixedInvokeC1");
+savedAssociation.Remove("useHighPriority");
+savedAssociation.Remove("ignoreInvokeIdValidation");
+await restored.LoadConfigurationAsync(new MemoryStream(Encoding.UTF8.GetBytes(savedSerial.ToJsonString())));
+Check(!restored.UseFixedInvokeC1 && !restored.UseHighPriority && !restored.IgnoreInvokeIdValidation,
+    "An older profile did not restore the default DLMS settings");
 vm.IdleTimeoutSeconds = "2.25";
 try { await vm.SaveConfigurationAsync(new MemoryStream()); throw new Exception("Too short an idle timeout was accepted"); }
 catch (ArgumentException) { checks++; }

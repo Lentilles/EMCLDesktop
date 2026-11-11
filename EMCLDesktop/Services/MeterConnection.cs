@@ -34,6 +34,13 @@ public sealed record MeterConnectionOptions(
     public int HdlcInformationFrameRetryCount { get; init; }
     public double HdlcAcknowledgementTimeoutSeconds { get; init; } = DefaultHdlcAcknowledgementTimeoutSeconds;
     public HdlcLinkParameters? HdlcParameters { get; init; }
+    public bool UseFixedInvokeC1 { get; init; }
+    public InvokePriority Priority { get; init; } = InvokePriority.Normal;
+    public bool IgnoreInvokeIdValidation { get; init; }
+    internal byte? FixedInvokeIdAndPriority =>
+        UseFixedInvokeC1 && Authentication == ClientAuthentication.High && Priority == InvokePriority.Normal
+            ? (byte)0xC1
+            : null;
 
     public ApduFraming CreateFraming(DiagnosticTrace? trace = null)
     {
@@ -156,6 +163,9 @@ public sealed class MeterConnection : IAsyncDisposable
         if (options.Authentication == ClientAuthentication.High &&
             (options.Conformance & DlmsConformance.Action) == 0)
             throw new ArgumentException("Для High нужен Action в Conformance.");
+        if (options.Priority == InvokePriority.High &&
+            (options.Conformance & DlmsConformance.PriorityManagement) == 0)
+            throw new ArgumentException("Для высокого приоритета запросов включите PriorityManagement в Conformance.");
 
         var idleTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
         var framing = options.CreateFraming(trace);
@@ -166,6 +176,7 @@ public sealed class MeterConnection : IAsyncDisposable
             password.Length != LnAssociationOptions.HighSecretLength)
             throw new ArgumentException("Для High нужен секрет длиной 16 байт.");
 
+        byte? invokeOverride = options.FixedInvokeIdAndPriority;
         var transportFactory = options.CreateTransportFactory();
         IApduChannel channel = await ApduChannels.ConnectAsync(
             new(new IdleTimeoutByteTransportFactory(transportFactory, idleTimeout, trace, options.Transport),
@@ -180,12 +191,16 @@ public sealed class MeterConnection : IAsyncDisposable
             {
                 Limits = options.Limits,
                 RequestTimeout = SessionSafetyDeadline,
+                Priority = options.Priority,
+                IgnoreInvokeIdValidation = options.IgnoreInvokeIdValidation,
+                FixedInvokeIdAndPriority = invokeOverride,
                 Association = new LnAssociationOptions
                 {
                     Authentication = options.Authentication,
                     Password = password,
                     MaxReceivePduSize = options.MaxReceivePduSize,
-                    Conformance = options.Conformance
+                    Conformance = options.Conformance,
+                    HlsInvokeIdAndPriority = invokeOverride
                 }
             });
         }
