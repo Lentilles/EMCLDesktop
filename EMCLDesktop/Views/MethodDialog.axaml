@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:EMCLDesktop.ViewModels"
+             x:Class="EMCLDesktop.Views.MethodDialog"
+             x:DataType="vm:MethodViewModel">
+    <UserControl.Styles>
+        <StyleInclude Source="/Styles/CommonStyles.axaml" />
+    </UserControl.Styles>
+    <Border Classes="panel" Padding="16">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+            <StackPanel Spacing="3">
+                <TextBlock Classes="field-label" Text="{Binding Index, StringFormat='Метод {0}'}" />
+                <TextBlock Classes="section-title" Text="{Binding Name}" TextWrapping="Wrap" />
+            </StackPanel>
+            <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="8">
+                    <CheckBox x:Name="Include" Content="Передать параметр" IsChecked="{Binding IncludeParameter, Mode=TwoWay}" />
+                    <StackPanel Spacing="6" IsVisible="{Binding IncludeParameter}">
+                        <TextBlock Text="Тип параметра" Classes="field-label" />
+                        <ComboBox ItemsSource="{Binding ParameterTypes}" SelectedItem="{Binding ArgumentType, Mode=TwoWay}"
+                                  AutomationProperties.Name="Тип параметра" PlaceholderText="Выберите тип" />
+                        <TextBlock Text="{Binding ParameterHint}" Classes="muted" FontSize="12" />
+                        <TextBox IsVisible="{Binding ShowParameterValue}" Text="{Binding ParameterText, Mode=TwoWay}"
+                                 AutomationProperties.Name="Значение параметра" AcceptsReturn="True"
+                                 TextWrapping="Wrap" MinHeight="52" MaxHeight="150" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Classes="secondary" Content="Закрыть" Click="CloseClick" />
+                <Button Classes="primary" Content="Вызвать" IsEnabled="{Binding IsInvokeEnabled}" Click="InvokeClick" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

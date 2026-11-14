@@ -32,6 +32,11 @@ public sealed partial class DlmsValueNodeViewModel : DlmsValuePreviewViewModel
     }
 
     public string Label { get; }
+    public string Path { get; private init; } = "";
+    private DlmsType? CollectionType { get; init; }
+    internal string? CompactSummary => CollectionType is { } type ? $"{type} [{items.Length}]" : null;
+    internal string FormatCollectionText() => CollectionType is { } type ? DlmsDisplay.Collection(type, items, full: true) : "";
+    public DlmsValue? ScalarValue => scalar;
     public bool IsScalar => scalar is not null;
     [ObservableProperty] public partial bool IsExpanded { get; set; }
 
@@ -41,7 +46,10 @@ public sealed partial class DlmsValueNodeViewModel : DlmsValuePreviewViewModel
     public IReadOnlyList<DlmsValueNodeViewModel> Children => children ??= CreateChildren();
 
     internal static DlmsValueNodeViewModel Collection(DlmsType type, ImmutableArray<DlmsValue> items) =>
-        new(DlmsDisplay.CollectionTitle(type, items.Length), items, 0, items.Length);
+        new(DlmsDisplay.CollectionTitle(type, items.Length), items, 0, items.Length)
+        {
+            CollectionType = type
+        };
 
     private IReadOnlyList<DlmsValueNodeViewModel> CreateChildren()
     {
@@ -56,16 +64,17 @@ public sealed partial class DlmsValueNodeViewModel : DlmsValuePreviewViewModel
         {
             int index = start + i * groupSize;
             int length = Math.Min(groupSize, count - i * groupSize);
-            nodes[i] = length == 1 ? Item(index, items[index])
-                : new($"[{index}–{index + length - 1}]", items, index, length);
+            nodes[i] = length == 1 ? Item(index, items[index], Path)
+                : new($"[{index}–{index + length - 1}]", items, index, length) { Path = Path };
         }
         return nodes;
     }
 
-    private static DlmsValueNodeViewModel Item(int index, DlmsValue value)
+    private static DlmsValueNodeViewModel Item(int index, DlmsValue value, string parentPath)
     {
         var items = DlmsDisplay.CollectionItems(value);
-        return items.IsDefault ? new($"[{index}] {value.Type}", value)
-            : new($"[{index}] {DlmsDisplay.CollectionTitle(value.Type, items.Length)}", items, 0, items.Length);
+        string path = $"{parentPath}[{index}]";
+        return items.IsDefault ? new($"[{index}] {value.Type}", value) { Path = path }
+            : new($"[{index}] {DlmsDisplay.CollectionTitle(value.Type, items.Length)}", items, 0, items.Length) { Path = path };
     }
 }

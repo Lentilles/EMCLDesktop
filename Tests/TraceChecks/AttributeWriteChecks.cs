@@ -347,11 +347,12 @@ internal static class AttributeWriteChecks
             }
         }
 
-        foreach (var outcome in new[] { "ok", "octet-text", "reject", "lost", "read-fails", "write-only", "no-get", "no-set", "no-tree",
+        foreach (var outcome in new[] { "batch-ok", "batch-reject", "ok", "octet-text", "reject", "lost", "read-fails", "write-only", "no-get", "no-set", "no-tree",
             "boundary", "boundary-plus", "blocks-ok", "blocks-reject-first", "blocks-reject-middle", "blocks-reject-last",
             "blocks-lost", "blocks-no-support", "blocks-limit", "blocks-too-small", "blocks-bad-number", "blocks-bad-invoke",
             "blocks-bad-final", "blocks-cancel", "blocks-timeout", "cancel-before" })
         {
+            bool batch = outcome.StartsWith("batch-", StringComparison.Ordinal);
             var channel = new MeterChannel(outcome);
             var transferLimits = new ProtocolLimits { MaxBlockCount = outcome == "blocks-limit" ? 2 : 4096 };
             var session = new DlmsClientSession(channel, new ClientSessionOptions
@@ -369,10 +370,13 @@ internal static class AttributeWriteChecks
                 null, [session, ClientAuthentication.None, LogicalName.Parse(options.AssociationObis), TimeSpan.FromHours(1), options], null)!;
             if (outcome != "no-tree")
             {
+                DlmsValue Access(int index) => DlmsValue.Structure(DlmsValue.Number(DlmsType.Int8, index),
+                    DlmsValue.Number(DlmsType.Enum, outcome == "write-only" ? 2 : 3), DlmsValue.Null);
                 var entry = DlmsValue.Structure(DlmsValue.Number(DlmsType.UInt16, 1), DlmsValue.Number(DlmsType.UInt8, 0),
-                    DlmsValue.Octets([1, 0, 0, 2, 0, 255]), DlmsValue.Structure(DlmsValue.Array(
-                        DlmsValue.Structure(DlmsValue.Number(DlmsType.Int8, 2),
-                            DlmsValue.Number(DlmsType.Enum, outcome == "write-only" ? 2 : 3), DlmsValue.Null)), DlmsValue.Array()));
+                    DlmsValue.Octets([1, 0, 0, 2, 0, 255]), DlmsValue.Structure(
+                        batch ? DlmsValue.Array(Access(2), Access(3), Access(4)) : DlmsValue.Array(Access(2)),
+                        batch ? DlmsValue.Array(DlmsValue.Structure(DlmsValue.Number(DlmsType.Int8, 1),
+                            DlmsValue.Number(DlmsType.Enum, 1))) : DlmsValue.Array()));
                 var imported = new EmclBuilder().CreateImporter().Import(DlmsValue.Array(entry), "test", "test", 1);
                 typeof(MeterConnection).GetProperty(nameof(MeterConnection.Association))!.SetValue(meter, imported);
             }
@@ -394,6 +398,61 @@ internal static class AttributeWriteChecks
             vm.Objects.Add(obj);
             vm.SelectedObject = obj;
             Check(attribute.IsWriteEnabled == (outcome is not ("no-set" or "no-tree")), "Write availability ignored live association");
+            if (batch)
+            {
+                var structure = new AttributeViewModel(3, "structure", "Structure", "", true) { IsWriteEnabled = true };
+                var later = new AttributeViewModel(4, "later", "UInt16", "", true) { IsWriteEnabled = true };
+                obj.Attributes.Add(structure);
+                obj.Attributes.Add(later);
+                var original = DlmsValue.Structure(DlmsValue.Array(DlmsValue.Number(DlmsType.UInt16, 11)));
+                structure.RememberReadValue(original);
+                var editor = new AttributeDialogViewModel(vm, obj, structure, edit: false);
+                editor.SelectedNode = editor.Nodes.Single().Children.Single().Children.Single();
+                Check(!editor.ShowLeafEditor && editor.ShowEditButton && editor.SelectedPath == "structure[0][0]",
+                    "Compound preview did not navigate to a nested field");
+                var selected = editor.SelectedNode;
+                editor.CollectionViewIndex = 1;
+                Check(editor.ShowCollectionText && !editor.ShowTree && editor.CollectionText.Contains("[0] UInt16: 11"),
+                    "Text view lost a nested value");
+                editor.CollectionViewIndex = 0;
+                Check(editor.ShowTree && !editor.ShowCollectionText && editor.SelectedNode == selected,
+                    "Switching back to the tree lost the selected field");
+                editor.BeginEdit();
+                Check(editor.ShowLeafEditor && editor.LeafText == "11", "Editing did not retain the selected leaf");
+                editor.LeafText = "65536";
+                Check(!editor.Apply() && !structure.HasPendingValue, "An invalid leaf was staged");
+                editor.LeafText = "77";
+                Check(editor.Apply() && structure.HasPendingValue && original.Items[0].Items[0].AsUInt64() == 11 &&
+                    structure.PendingValue!.Items[0].Items[0].AsUInt64() == 77, "Tree edit changed read data or lost the nested value");
+                foreach (var scalar in new[] { attribute, later })
+                {
+                    var scalarEditor = new AttributeDialogViewModel(vm, obj, scalar, edit: true);
+                    scalarEditor.Editor.WriteText = "77";
+                    Check(scalarEditor.Apply(), "Could not stage a scalar for the batch");
+                }
+                Check(channel.Sets == 0 && vm.WritePendingCommand.CanExecute(null) && vm.WritePendingText.EndsWith("(3)"),
+                    "Staging performed a write or failed to update the action");
+                await vm.WritePendingCommand.ExecuteAsync(null);
+                bool rejected = outcome == "batch-reject";
+                Check(!vm.IsBusy && !attribute.HasPendingValue && structure.HasPendingValue == rejected &&
+                    later.HasPendingValue == rejected && channel.WriteIndexes.SequenceEqual(rejected
+                        ? new sbyte[] { 2, 3 } : new sbyte[] { 2, 3, 4 }),
+                    "Batch replayed a confirmed SET, dropped an unconfirmed value, or continued after rejection");
+                Check(vm.HasStatusError == rejected && vm.Status.Contains(rejected ? "1 из 3" : "3 из 3"),
+                    "Batch status lost confirmed write count");
+                if (!rejected)
+                {
+                    var method = new MethodViewModel(1, "null_argument", "Null", "");
+                    obj.Methods.Add(method);
+                    Check(method.IncludeParameter && !method.ShowParameterValue, "Null still displayed a value input");
+                    await vm.InvokeMethodAsync(method);
+                    method.IncludeParameter = false;
+                    await vm.InvokeMethodAsync(method);
+                    Check(channel.ActionParameters is [{ Type: DlmsType.Null }, null] && !vm.HasStatusError,
+                        "Explicit AXDR Null and omitted ACTION parameter were encoded alike");
+                }
+                continue;
+            }
             if (outcome == "octet-text")
             {
                 Check(attribute.TryChangeWriteOctetFormat(windows1251), "Could not choose Windows-1251 for writing");
@@ -454,6 +513,16 @@ internal static class AttributeWriteChecks
                 Check(channel.Gets == 0 && !vm.HasStatusError && attribute.Value.Contains("не считано"),
                     "Read-back was attempted without read access or negotiated GET");
         }
+        await using (var vm = new MainViewModel())
+        {
+            var obj = new MeterObjectViewModel(LogicalName.Parse("1.0.99.1.0.255"), 7, 1, "Profile Generic");
+            var buffer = new AttributeViewModel(2, "buffer", "Array", "", true) { UseTextValueView = true };
+            var rows = Enumerable.Repeat(DlmsValue.Null, 5001).Append(DlmsValue.Octets(new byte[65]));
+            buffer.RememberReadValue(new DlmsValue(DlmsType.Array, rows));
+            var viewer = new AttributeDialogViewModel(vm, obj, buffer, edit: false);
+            Check(viewer.ShowCollectionText && viewer.CollectionText.Contains("[5001] OctetString: " + new string('0', 130)),
+                "Text mode truncated collection items or individual octets");
+        }
         return count;
     }
 
@@ -462,6 +531,8 @@ internal static class AttributeWriteChecks
         private readonly Channel<ReadOnlyMemory<byte>> replies = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
         private readonly ApduCodec codec = new();
         public int Sets { get; private set; }
+        public List<sbyte> WriteIndexes { get; } = [];
+        public List<DlmsValue?> ActionParameters { get; } = [];
         public int Gets { get; private set; }
         public int BlockRequests { get; private set; }
         public int WritesApplied { get; private set; }
@@ -532,6 +603,15 @@ internal static class AttributeWriteChecks
                     if (request.Operation.Kind == CosemOperationKind.Write)
                     {
                         Sets++;
+                        if (outcome.StartsWith("batch-", StringComparison.Ordinal))
+                        {
+                            WriteIndexes.Add(request.Operation.Index);
+                            bool rejected = outcome == "batch-reject" && request.Operation.Index == 3;
+                            stored = request.Operation.Value;
+                            response = new LnResponse(CosemOperationKind.Write, request.InvokeIdAndPriority,
+                                rejected ? new OperationResult(CosemResultCode.ReadWriteDenied) : OperationResult.Ok());
+                            break;
+                        }
                         if (outcome is "boundary" or "octet-text")
                         {
                             stored = request.Operation.Value;
@@ -545,6 +625,11 @@ internal static class AttributeWriteChecks
                         if (outcome == "lost") throw new IOException("Connection lost after sending SET");
                         response = new LnResponse(request.Operation.Kind, request.InvokeIdAndPriority,
                             outcome == "reject" ? new OperationResult(CosemResultCode.ReadWriteDenied) : OperationResult.Ok());
+                    }
+                    else if (request.Operation.Kind == CosemOperationKind.Invoke)
+                    {
+                        ActionParameters.Add(request.Operation.Value);
+                        response = new LnResponse(CosemOperationKind.Invoke, request.InvokeIdAndPriority, OperationResult.Ok());
                     }
                     else
                     {

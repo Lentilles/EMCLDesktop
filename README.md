@@ -70,7 +70,9 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Once all six builds succeed, the workflow creates a GitHub Release with the packages, automatically generated release notes, and a `SHA256SUMS` file. Tags with a suffix, such as `v1.2.3-rc.1`, create a prerelease. The version number is included in the build and package name. Rerunning the workflow does not replace assets of an already published release; an unfinished draft can be completed and published.
+Once all six builds succeed, the workflow creates a GitHub Release with the packages, release notes, and a `SHA256SUMS` file. To supply a changelog, add `.github/release-notes/<tag>.md` to the tagged commit. For example, `.github/release-notes/v1.2.3.md` becomes the description for release `v1.2.3`. GitHub generates notes for new releases without a matching file. Tags with a suffix, such as `v1.2.3-rc.1`, create a prerelease. The version number is included in the build and package name. Rerunning the workflow does not replace assets of an already published release; an unfinished draft can be completed and published.
+
+[Release notes by version](.github/release-notes) are also available in the repository. To apply historical notes to an existing GitHub Release, edit its description on GitHub or run `gh release edit <tag> --notes-file .github/release-notes/<tag>.md`.
 
 Each package includes the README, the application's MIT license, the EMCL license, and a `build-info.json` file containing the version, architecture, and commit IDs of both repositories. On macOS, these files are located in `EMCL Desktop.app/Contents/Resources`.
 
@@ -112,15 +114,14 @@ Selecting an object does not read its values. A saved catalog remains visible af
 | Association | Client and server addresses, Association LN version, association OBIS, Conformance, maximum PDU size |
 | Authentication | `None`, `Low`, `High`; password as UTF-8, HEX, or an environment variable name |
 | Communication | Connection timeout, No traffic interval, KeepAlive, handling of identical `object_list` entries |
-| Advanced | Fixed Invoke-Id-And-Priority octet, high request priority, acceptance of mismatched response octets |
+| Advanced | High request priority, acceptance of mismatched response octets |
 
 `High` authentication requires a 16-byte secret. All supported Conformance flags are enabled by default and can be toggled individually; loading a JSON configuration restores them from the file. Reading the association requires `Get`; `High` authentication also requires `Action`.
 
 - **High request priority** sets bit `0x80` on requests and keeps the automatically allocated Invoke IDs. Enable `PriorityManagement` in Conformance and ensure the meter negotiates it.
-- **Fixed Invoke ID and priority (0xC1)** is a compatibility option that sends `0xC1` during `High` authentication and on later requests. It applies when explicitly enabled with `High` authentication and high request priority turned off.
 - **Accept responses with a different Invoke ID or priority** allows a mismatch during HLS and subsequent exchanges, including GET and SET block transfers. The application sends one request at a time and EMCL checks the response service, block sequence, and HLS challenge.
 
-JSON profiles store these settings as `association.useFixedInvokeC1`, `association.useHighPriority`, and `association.ignoreInvokeIdValidation`. Each setting defaults to off, including when loading profiles without its field.
+JSON profiles store these settings as `association.useHighPriority` and `association.ignoreInvokeIdValidation`. Both default to off. The compatibility flag `association.useFixedInvokeC1` is available through JSON profiles and applies to `High` authentication with normal request priority.
 
 Serial uses direct binary communication at the configured baud rate, without an initial IEC 62056-21 exchange or baud rate switching. Hardware handshaking controls RTS automatically. TCP and Serial settings remain in their fields when switching transports; JSON stores the settings for the selected transport.
 

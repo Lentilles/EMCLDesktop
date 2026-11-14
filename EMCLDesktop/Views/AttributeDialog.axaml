@@ -1,0 +1,139 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="using:EMCLDesktop.Views"
+             xmlns:vm="using:EMCLDesktop.ViewModels"
+             x:Class="EMCLDesktop.Views.AttributeDialog"
+             x:DataType="vm:AttributeDialogViewModel">
+    <UserControl.Resources>
+        <DataTemplate x:Key="ScalarPreview" x:DataType="vm:DlmsValuePreviewViewModel">
+            <StackPanel Spacing="6">
+                <Border IsVisible="{Binding HasReadOctets}" BorderBrush="#31435B" BorderThickness="1"
+                        CornerRadius="5" ClipToBounds="True">
+                    <StackPanel>
+                        <Border Background="#214A61" Padding="8,5">
+                            <Grid ColumnDefinitions="105,*" ColumnSpacing="8">
+                                <TextBlock Text="Формат" Classes="field-label" />
+                                <TextBlock Grid.Column="1" Text="Значение" Classes="field-label" />
+                            </Grid>
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding ReadOctetPreviews}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:OctetStringPreview">
+                                    <Border Background="#142033" BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="8,5">
+                                        <Grid ColumnDefinitions="105,*" ColumnSpacing="8">
+                                            <TextBlock Text="{Binding Format.Label}" TextWrapping="Wrap" FontSize="12" />
+                                            <SelectableTextBlock Grid.Column="1" Text="{Binding Text}"
+                                                                 TextWrapping="Wrap" FontSize="12" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Panel IsVisible="{Binding !HasReadOctets}">
+                    <views:OctetStringField IsVisible="{Binding HasReadFormats}" Text="{Binding DisplayedValue, Mode=OneWay}"
+                                            Format="{Binding ReadOctetFormat, Mode=TwoWay}" Previews="{Binding ReadOctetPreviews}" />
+                </Panel>
+                <SelectableTextBlock IsVisible="{Binding !HasReadFormats}" Text="{Binding DisplayedValue}" TextWrapping="Wrap" />
+                <SelectableTextBlock IsVisible="{Binding HasReadNumber}" Text="{Binding NumericHexValue}"
+                                     Foreground="#ACBED3" FontSize="12" />
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <StyleInclude Source="/Styles/CommonStyles.axaml" />
+        <Style Selector="Button.dialog-action">
+            <Setter Property="Width" Value="116" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TreeViewItem" x:DataType="vm:DlmsValueNodeViewModel">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Classes="panel" Padding="16">
+        <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="12">
+            <StackPanel Spacing="3">
+                <TextBlock Classes="field-label" Text="{Binding Context}" />
+                <TextBlock Classes="section-title" Text="{Binding Title}" TextWrapping="Wrap" />
+                <TabStrip IsVisible="{Binding CanChooseCollectionView}" SelectedIndex="{Binding CollectionViewIndex, Mode=TwoWay}"
+                          AutomationProperties.Name="Вид составного значения" Margin="0,4,0,0">
+                    <TabStrip.ItemsPanel>
+                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                    </TabStrip.ItemsPanel>
+                    <TabStripItem Content="Дерево" />
+                    <TabStripItem Content="Текст" />
+                </TabStrip>
+            </StackPanel>
+            <Grid Grid.Row="1" MinHeight="160">
+                <Grid IsVisible="{Binding ShowTree}" ColumnDefinitions="1*,1*" ColumnSpacing="12" MinHeight="240">
+                    <TreeView ItemsSource="{Binding Nodes}" SelectedItem="{Binding SelectedNode, Mode=TwoWay}"
+                              AutomationProperties.Name="Структура значения" Background="#142033"
+                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                        <TreeView.ItemTemplate>
+                            <TreeDataTemplate x:DataType="vm:DlmsValueNodeViewModel" ItemsSource="{Binding Children}">
+                                <TextBlock Text="{Binding Label}" FontSize="13" />
+                            </TreeDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="{Binding SelectedPath}" Classes="field-label" FontFamily="monospace" />
+                            <TextBlock Text="{Binding SelectedNode.Label}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                            <ContentControl IsVisible="{Binding ShowLeafValue}" Content="{Binding SelectedNode}"
+                                            ContentTemplate="{StaticResource ScalarPreview}" />
+                            <TextBox IsVisible="{Binding ShowLeafEditor}" x:Name="LeafValue"
+                                     Text="{Binding LeafText, Mode=TwoWay}" AutomationProperties.Name="Значение поля"
+                                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52" MaxHeight="200" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+                <TextBox IsVisible="{Binding ShowCollectionText}" Text="{Binding CollectionText, Mode=OneWay}"
+                         AutomationProperties.Name="Составное значение текстом" IsReadOnly="True" AcceptsReturn="True"
+                         TextWrapping="NoWrap" FontFamily="monospace" MinHeight="240"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                <ScrollViewer IsVisible="{Binding ShowScalar}" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="6">
+                        <ContentControl Content="{Binding Editor}" ContentTemplate="{StaticResource ScalarPreview}"
+                                        IsVisible="{Binding Editor.CanUseReadValue}" />
+                        <SelectableTextBlock Text="{Binding ScalarSummary}" TextWrapping="Wrap"
+                                             IsVisible="{Binding !Editor.CanUseReadValue}" />
+                    </StackPanel>
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding EditWholeValue}" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Тип для записи" Classes="field-label" />
+                        <ComboBox ItemsSource="{Binding Editor.WriteTypes}" SelectedItem="{Binding Editor.WriteType, Mode=TwoWay}"
+                                  PlaceholderText="Выберите тип" MinWidth="180" />
+                        <TextBlock Text="{Binding Editor.WriteHint}" Classes="muted" FontSize="12" />
+                        <TextBlock Text="Новое значение" Classes="field-label" />
+                        <views:OctetStringField IsVisible="{Binding Editor.IsWritingOctets}" IsReadOnly="False"
+                                                Text="{Binding Editor.WriteText, Mode=TwoWay}" Format="{Binding Editor.WriteOctetFormat}"
+                                                Previews="{Binding Editor.WriteOctetPreviews}" FormatRequested="WriteOctetFormatRequested" />
+                        <TextBox IsVisible="{Binding !Editor.IsWritingOctets}" Text="{Binding Editor.WriteText, Mode=TwoWay}"
+                                 AutomationProperties.Name="Новое значение" AcceptsReturn="True" TextWrapping="Wrap"
+                                 MinHeight="64" MaxHeight="240" />
+                        <Button Content="Из считанного" Classes="secondary"
+                                IsEnabled="{Binding Editor.CanUseReadValue}" Click="UseReadValueClick" />
+                        <TextBlock Text="{Binding Editor.WriteStatus}" Classes="muted" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+            <TextBlock Grid.Row="2" Text="{Binding Error}" Foreground="#FFB3BB" TextWrapping="Wrap" />
+            <WrapPanel Grid.Row="3" HorizontalAlignment="Right">
+                <Button Content="Редактировать целиком" Classes="secondary" Margin="0,0,8,4"
+                        IsVisible="{Binding ShowWholeValueButton}" Click="EditWholeValueClick" />
+                <Button x:Name="CloseButton" Content="Закрыть" Classes="secondary dialog-action" Margin="0,0,8,4" Click="CloseClick" />
+                <Button Content="Изменить" Classes="primary dialog-action" Margin="0,0,0,4"
+                        IsVisible="{Binding ShowEditButton}" Click="EditClick" />
+                <Button x:Name="ApplyButton" Content="Применить" Classes="primary dialog-action" Margin="0,0,0,4"
+                        IsVisible="{Binding IsEditing}" Click="ApplyClick" />
+            </WrapPanel>
+        </Grid>
+    </Border>
+</UserControl>

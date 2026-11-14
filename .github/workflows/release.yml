@@ -122,6 +122,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@v6
+        with:
+          path: source
+          persist-credentials: false
+
       - name: Download all six packages
         uses: actions/download-artifact@v8
         with:
@@ -160,14 +166,22 @@ jobs:
           if [[ "$RELEASE_TAG" == *-* ]]; then
             flags+=(--prerelease)
           fi
+          notes=()
+          notes_file="source/.github/release-notes/${RELEASE_TAG}.md"
+          if [[ -s "$notes_file" ]]; then
+            notes+=(--notes-file "$notes_file")
+          fi
           if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null); then
             if [[ "$draft" != true ]]; then
               echo 'This release is already published; its assets will not be replaced.'
               exit 0
             fi
             gh release upload "$RELEASE_TAG" release/* --clobber
-            gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
+            gh release edit "$RELEASE_TAG" --draft=false "${notes[@]}" "${flags[@]}"
           else
+            if [[ ${#notes[@]} -eq 0 ]]; then
+              notes+=(--generate-notes)
+            fi
             gh release create "$RELEASE_TAG" release/* \
-              --verify-tag --title "EMCL Desktop $RELEASE_TAG" --generate-notes "${flags[@]}"
+              --verify-tag --title "EMCL Desktop $RELEASE_TAG" "${notes[@]}" "${flags[@]}"
           fi

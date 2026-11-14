@@ -70,6 +70,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     ];
     public ObservableCollection<MeterObjectViewModel> Objects { get; } = [];
     public ObservableCollection<ObjectGroupViewModel> VisibleGroups { get; } = [];
+    private readonly Dictionary<(ushort ClassId, byte ClassVersion), bool> groupExpansion = [];
+    private bool defaultGroupExpansion = true;
 
     [ObservableProperty] public partial string Transport { get; set; } = "TCP";
     [ObservableProperty] public partial string SerialPortName { get; set; } = "";
@@ -709,12 +711,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         ReadSelectedObjectCommand.NotifyCanExecuteChanged();
         UpdateObjectOperationAvailability();
         if (!IsReading && IsConnected && value != null)
-            Status = $"Выбран {value.Obis}. Нажмите «Считать все атрибуты» или «Считать» у нужного атрибута.";
+            Status = $"Выбран {value.Obis}.";
     }
 
     private void UpdateObjectOperationAvailability()
     {
-        if (SelectedObject is not { } obj) return;
+        if (SelectedObject is not { } obj)
+        {
+            NotifyPendingWritesChanged();
+            return;
+        }
         bool isIdle = !IsBusy && !IsReading;
         foreach (var attribute in obj.Attributes)
         {
@@ -731,14 +737,31 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             method.IsInvokeEnabled = isIdle && reason.Length == 0;
         }
         obj.IsProfileReadEnabled = isIdle;
+        NotifyPendingWritesChanged();
     }
 
     private static string MethodInvokeUnavailableReason(MeterObjectViewModel obj, MethodViewModel method,
         MeterConnection? meter) => meter?.InvokeUnavailableReason(obj.ClassId, obj.LogicalName, method.Index)
         ?? "Подключитесь к счётчику для вызова метода.";
 
+    [RelayCommand]
+    private void ExpandAllGroups() => SetGroupExpansion(true);
+
+    [RelayCommand]
+    private void CollapseAllGroups() => SetGroupExpansion(false);
+
+    private void SetGroupExpansion(bool expanded)
+    {
+        defaultGroupExpansion = expanded;
+        groupExpansion.Clear();
+        foreach (var group in VisibleGroups)
+            group.IsExpanded = expanded;
+    }
+
     private void ApplyObjectFilter()
     {
+        foreach (var group in VisibleGroups)
+            groupExpansion[group.Key] = group.IsExpanded;
         try
         {
             var query = SearchText ?? "";
@@ -772,7 +795,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
 
             VisibleGroups.Clear();
             foreach (var group in groups)
+            {
+                group.IsExpanded = groupExpansion.GetValueOrDefault(group.Key, defaultGroupExpansion);
                 VisibleGroups.Add(group);
+            }
             VisibleObjectCount = filtered.Length;
             SearchError = "";
             if (SelectedObject != null && !filtered.Contains(SelectedObject))
@@ -1228,18 +1254,58 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         return ReadAttributesAsync(obj, [attribute]);
     }
 
-    public async Task WriteAttributeAsync(AttributeViewModel attribute)
+    public string WritePendingText
+    {
+        get
+        {
+            int count = SelectedObject?.Attributes.Count(attribute => attribute.HasPendingValue) ?? 0;
+            return count == 0 ? "Записать изменения" : $"Записать изменения ({count})";
+        }
+    }
+
+    private bool CanWritePending() => IsConnected && !IsBusy && !IsReading &&
+        SelectedObject?.Attributes.Any(attribute => attribute.HasPendingValue && attribute.IsWriteEnabled) == true;
+
+    private void NotifyPendingWritesChanged()
+    {
+        OnPropertyChanged(nameof(WritePendingText));
+        WritePendingCommand.NotifyCanExecuteChanged();
+    }
+
+    internal ProtocolLimits ValueLimits => limits;
+
+    internal bool StageAttribute(MeterObjectViewModel obj, AttributeViewModel attribute, DlmsValue? value)
+    {
+        if (obj != SelectedObject || !obj.Attributes.Contains(attribute) || !attribute.IsWriteEnabled || IsBusy || IsReading)
+            return false;
+        attribute.PendingValue = value;
+        attribute.WriteStatus = "";
+        NotifyPendingWritesChanged();
+        Status = $"{obj.Obis}, атрибут {attribute.Index}: " +
+            (value is null ? "нет изменений к записи." : "подготовлен к записи.");
+        return true;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanWritePending))]
+    private Task WritePendingAsync()
+    {
+        if (!CanWritePending()) return Task.CompletedTask;
+        var obj = SelectedObject!;
+        var entries = obj.Attributes.Where(attribute => attribute.PendingValue is not null)
+            .Select(attribute => (attribute, attribute.PendingValue!)).ToArray();
+        return WriteAttributesAsync(obj, entries, batch: true);
+    }
+
+    public Task WriteAttributeAsync(AttributeViewModel attribute)
     {
         var obj = SelectedObject;
-        var meter = connection;
-        if (obj is null || !obj.Attributes.Contains(attribute) || IsBusy || IsReading) return;
-        string reason = meter?.WriteUnavailableReason(obj.ClassId, obj.LogicalName, attribute.Index)
-            ?? "Подключитесь к счётчику для записи.";
+        if (obj is null || !obj.Attributes.Contains(attribute) || IsBusy || IsReading) return Task.CompletedTask;
+        string reason = WriteUnavailableReason(obj, attribute);
         if (reason.Length != 0)
         {
             attribute.WriteStatus = reason;
             ReportError(reason);
-            return;
+            return Task.CompletedTask;
         }
 
         DlmsValue value;
@@ -1253,18 +1319,72 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             attribute.WriteStatus = error.Message;
             ReportError($"{obj.Obis}, атрибут {attribute.Index}: {error.Message}");
+            return Task.CompletedTask;
+        }
+
+        return WriteAttributesAsync(obj, [(attribute, value)], batch: false);
+    }
+
+    private string WriteUnavailableReason(MeterObjectViewModel obj, AttributeViewModel attribute) =>
+        connection?.WriteUnavailableReason(obj.ClassId, obj.LogicalName, attribute.Index)
+        ?? "Подключитесь к счётчику для записи.";
+
+    private async Task WriteAttributesAsync(MeterObjectViewModel obj,
+        (AttributeViewModel Attribute, DlmsValue Value)[] entries, bool batch)
+    {
+        var meter = connection;
+        if (meter is null || IsBusy || IsReading || obj != SelectedObject) return;
+        foreach (var (attribute, _) in entries)
+        {
+            string reason = WriteUnavailableReason(obj, attribute);
+            if (reason.Length == 0) continue;
+            attribute.WriteStatus = reason;
+            ReportError($"{obj.Obis}, атрибут {attribute.Index}: {reason}");
             return;
         }
 
         int version = selectionVersion;
-        using var operation = BeginOperation("запись атрибута");
+        using var operation = BeginOperation(batch ? "запись изменений" : "запись атрибута");
         IsBusy = true;
+        int confirmed = 0;
+        try
+        {
+            foreach (var (attribute, value) in entries)
+            {
+                if (version != selectionVersion || meter != connection) return;
+                if (!await WriteAttributeCoreAsync(obj, attribute, value, meter, version, operation))
+                    break;
+                confirmed++;
+                if (operation.IsCancellationRequested || !meter.IsActive || HasStatusError) break;
+            }
+
+            if (batch)
+            {
+                string progress = $"Записано атрибутов: {confirmed} из {entries.Length}.";
+                if (HasStatusError) ReportError($"{progress} {Status}");
+                else Status = confirmed == entries.Length && !operation.IsCancellationRequested
+                    ? progress : $"{progress} {Status}";
+            }
+        }
+        finally
+        {
+            if (operation.IsCancellationRequested) await CloseCancelledConnectionAsync(meter);
+            if (meter == connection && !meter.IsActive) IsConnected = false;
+            IsBusy = false;
+        }
+    }
+
+    private async Task<bool> WriteAttributeCoreAsync(MeterObjectViewModel obj, AttributeViewModel attribute,
+        DlmsValue value, MeterConnection meter, int version, UserOperation operation)
+    {
         attribute.WriteStatus = "Запись…";
         Status = $"Запись {obj.Obis}: атрибут {attribute.Index}…";
         try
         {
-            await meter!.WriteAsync(obj.ClassId, obj.LogicalName, attribute.Index, value, operation.Token);
-            if (version != selectionVersion || meter != connection) return;
+            await meter.WriteAsync(obj.ClassId, obj.LogicalName, attribute.Index, value, operation.Token);
+            if (version != selectionVersion || meter != connection) return false;
+            attribute.PendingValue = null;
+            NotifyPendingWritesChanged();
             attribute.ForgetReadValue();
             attribute.Value = "Запись подтверждена. Фактическое значение не считано.";
             InvalidateProfileAfterWrite(obj, attribute);
@@ -1275,7 +1395,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 {
                     var actual = await meter.ReadAsync(obj.ClassId, obj.LogicalName,
                         attribute.Index, cancellationToken: operation.Token);
-                    if (version != selectionVersion || meter != connection) return;
+                    if (version != selectionVersion || meter != connection) return false;
                     ApplyReadResult(obj, attribute, actual);
                     attribute.WriteStatus = "Запись подтверждена. Значение перечитано со счётчика.";
                 }
@@ -1283,20 +1403,21 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 {
                     attribute.WriteStatus = "Запись подтверждена. Перечитывание отменено.";
                     await ReportCancellationAsync(meter, $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
-                    return;
+                    return true;
                 }
                 catch (Exception error)
                 {
                     attribute.WriteStatus = $"Запись подтверждена, но перечитать значение не удалось: {error.Message}";
                     ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
-                    return;
+                    return true;
                 }
             }
             Status = $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}";
+            return true;
         }
         catch (Exception error)
         {
-            if (version != selectionVersion || meter != connection) return;
+            if (version != selectionVersion || meter != connection) return false;
             if (error is not (DlmsOperationException or ArgumentException or InvalidOperationException or NotSupportedException or OperationCanceledException))
             {
                 attribute.ForgetReadValue();
@@ -1315,12 +1436,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             if (operation.IsCancellationRequested && error is OperationCanceledException)
                 await ReportCancellationAsync(meter, $"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
             else ReportError($"{obj.Obis}, атрибут {attribute.Index}: {attribute.WriteStatus}");
-        }
-        finally
-        {
-            if (operation.IsCancellationRequested) await CloseCancelledConnectionAsync(meter);
-            if (meter == connection && meter?.IsActive != true) IsConnected = false;
-            IsBusy = false;
+            return false;
         }
     }
 
@@ -1329,7 +1445,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (!obj.IsProfileGeneric) return;
         obj.ProfileBuffer = null;
         obj.ProfileTable = null;
-        obj.ProfileTableStatus = "После записи перечитайте buffer и capture_objects.";
+        obj.ProfileTableStatus = "После записи считайте профиль повторно.";
         if (attribute.Index != ProfileGenericMembers.Attributes.CaptureObjects) return;
         obj.ProfileCaptureObjects = null;
         obj.ProfileCaptureColumns.Clear();
@@ -1350,21 +1466,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             return;
         }
 
-        DlmsValue? parameter = null;
-        if (method.IncludeParameter)
+        DlmsValue? parameter;
+        try { parameter = method.CreateArgument(limits); }
+        catch (FormatException error)
         {
-            try
-            {
-                if (method.ArgumentType is not { } type)
-                    throw new FormatException("Выберите тип параметра.");
-                parameter = DlmsValueEditor.Parse(type, method.ParameterText, limits);
-            }
-            catch (FormatException error)
-            {
-                method.InvokeStatus = error.Message;
-                ReportError($"{target}. {error.Message}");
-                return;
-            }
+            method.InvokeStatus = error.Message;
+            ReportError($"{target}: {error.Message}");
+            return;
         }
 
         using var operation = BeginOperation("вызов метода");
@@ -1431,7 +1539,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         obj.ProfileCaptureColumns.Clear();
         obj.SelectedProfileCaptureColumn = null;
         obj.ProfileTable = null;
-        obj.ProfileTableStatus = "После вызова метода перечитайте buffer и capture_objects.";
+        obj.ProfileTableStatus = "После вызова метода считайте профиль повторно.";
     }
 
     public async Task ReadProfileAsync(MeterObjectViewModel obj)
@@ -1752,7 +1860,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         if (obj.ProfileCaptureObjects == null || obj.ProfileBuffer == null)
         {
             obj.ProfileTable = null;
-            obj.ProfileTableStatus = "Для таблицы нужны buffer и capture_objects.";
+            obj.ProfileTableStatus = "Нажмите «Считать профиль», чтобы загрузить записи.";
             return;
         }
         try

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using EMCL.Core.Codecs;
 using EMCL.Core.Objects;
 using EMCL.Core.Values;
 using EMCL.Objects.ProfileGeneric;
@@ -29,6 +30,11 @@ public sealed partial class MeterObjectViewModel(LogicalName logicalName, ushort
     public string ClassName { get; } = className ?? UnknownClassName;
     public string Title => $"{Obis}  ·  {ClassName}";
     public bool IsProfileGeneric => ClassId == CosemClassIds.ProfileGeneric;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowProfileRecords), nameof(ShowObjectMembers))]
+    public partial int ProfileModeIndex { get; set; }
+    public bool ShowProfileRecords => IsProfileGeneric && ProfileModeIndex == 0;
+    public bool ShowObjectMembers => !ShowProfileRecords;
     public IReadOnlyList<ProfileReadModeOption> ProfileReadModes => readModes;
     public ObservableCollection<ProfileCaptureColumnViewModel> ProfileCaptureColumns { get; } = [];
     [ObservableProperty] public partial bool IsSelected { get; set; }
@@ -43,7 +49,7 @@ public sealed partial class MeterObjectViewModel(LogicalName logicalName, ushort
     [ObservableProperty] public partial ProfileCaptureColumnViewModel? SelectedProfileCaptureColumn { get; set; }
     [ObservableProperty] public partial ProfileTableViewModel? ProfileTable { get; set; }
     [ObservableProperty] public partial string ProfileTableStatus { get; set; } =
-        "Считайте buffer и capture_objects, чтобы увидеть таблицу.";
+        "Нажмите «Считать профиль», чтобы увидеть записи.";
     public bool HasProfileTable => ProfileTable is not null;
     public bool IsProfileCountMode => SelectedProfileReadMode.Mode is ProfileReadMode.First or ProfileReadMode.Last;
     public bool IsProfileEntryRangeMode => SelectedProfileReadMode.Mode == ProfileReadMode.Entries;
@@ -94,7 +100,7 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     public bool CanRead { get; } = canRead;
     [ObservableProperty] public partial bool IsReadEnabled { get; set; } = true;
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayedValue))]
+    [NotifyPropertyChangedFor(nameof(DisplayedValue), nameof(ValueSummary))]
     public partial string Value { get; set; } = "Не считано";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WriteHint))]
@@ -127,14 +133,39 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     [ObservableProperty] public partial string? WriteUnavailableReason { get; set; } = "Подключитесь к счётчику для записи.";
     [ObservableProperty] public partial bool CanUseReadValue { get; set; }
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(HasReadFormats), nameof(HasReadNumber), nameof(DisplayedValue), nameof(NumericHexValue))]
+    [NotifyPropertyChangedFor(nameof(HasReadOctets), nameof(HasReadFormats), nameof(HasReadNumber), nameof(DisplayedValue), nameof(NumericHexValue), nameof(HasScalarDetails), nameof(HasPlainSummary), nameof(ValueSummary), nameof(HasInlineInteger), nameof(InlineIntegerHex))]
     public partial DlmsValue? LastReadValue { get; private set; }
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasReadValueTree), nameof(ShowReadValueTree))]
+    [NotifyPropertyChangedFor(nameof(HasReadValueTree), nameof(ShowReadValueTree), nameof(HasValueBrowser), nameof(HasScalarDetails), nameof(HasPlainSummary), nameof(ValueSummary))]
     public partial IReadOnlyList<DlmsValueNodeViewModel> ReadValueNodes { get; private set; } = [];
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowReadValueTree))]
     public partial bool UseTextValueView { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingValue), nameof(HasValueBrowser), nameof(HasScalarDetails),
+        nameof(HasPlainSummary), nameof(ValueSummary), nameof(HasInlineInteger), nameof(InlineIntegerHex))]
+    public partial DlmsValue? PendingValue { get; internal set; }
+    public bool HasPendingValue => PendingValue is not null;
+    public bool HasValueBrowser => PendingValue is { } pending
+        ? !DlmsDisplay.CollectionItems(pending).IsDefault : HasReadValueTree;
+    private DlmsValue? SummaryValue => PendingValue ?? LastReadValue;
+    public bool HasInlineInteger => DlmsDisplay.IsInteger(SummaryValue?.Type);
+    public string InlineIntegerHex => SummaryValue is { } value && DlmsDisplay.IsInteger(value.Type)
+        ? DlmsDisplay.NumericHex(value) : "";
+    public bool HasScalarDetails => !HasValueBrowser && !HasInlineInteger &&
+        SummaryValue is { Type: not (DlmsType.Enum or DlmsType.Boolean) };
+    public bool HasPlainSummary => !HasValueBrowser && !HasScalarDetails && !HasInlineInteger;
+
+    public string ValueSummary => PendingValue switch
+    {
+        { } pending when DlmsDisplay.IsNumeric(pending.Type) => DlmsDisplay.NumericDecimal(pending),
+        { } pending => CollectionSummary(pending) ?? DlmsDisplay.Value(pending),
+        _ => ReadValueNodes.FirstOrDefault()?.CompactSummary ?? DisplayedValue
+    };
+
+    private static string? CollectionSummary(DlmsValue value) =>
+        DlmsDisplay.CollectionItems(value) is { IsDefault: false } items ? $"{value.Type} [{items.Length}]" : null;
+
     public bool HasReadValueTree => ReadValueNodes.Count != 0;
     public bool ShowReadValueTree => HasReadValueTree && !UseTextValueView;
     public bool IsWritingOctets => WriteType == DlmsType.OctetString;
@@ -245,12 +276,15 @@ public sealed partial class AttributeViewModel(sbyte index, string? name, string
     }
 }
 
-public sealed class ObjectGroupViewModel(string className, ushort classId, byte classVersion,
-    IReadOnlyList<MeterObjectViewModel> objects)
+public sealed partial class ObjectGroupViewModel(string className, ushort classId, byte classVersion,
+    IReadOnlyList<MeterObjectViewModel> objects) : ObservableObject
 {
     public string ClassName { get; } = className;
     public string Subtitle { get; } = $"Класс {classId} · версия {classVersion} · объектов: {objects.Count}";
     public IReadOnlyList<MeterObjectViewModel> Objects { get; } = objects;
+    public int Count => Objects.Count;
+    internal (ushort ClassId, byte ClassVersion) Key { get; } = (classId, classVersion);
+    [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
 }
 
 public sealed partial class MethodViewModel : ObservableObject
@@ -278,12 +312,27 @@ public sealed partial class MethodViewModel : ObservableObject
     public IReadOnlyList<DlmsType> ParameterTypes => DlmsValueEditor.Types;
     [ObservableProperty] public partial bool IncludeParameter { get; set; }
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ParameterHint))]
+    [NotifyPropertyChangedFor(nameof(ParameterHint), nameof(ShowParameterValue))]
     public partial DlmsType? ArgumentType { get; set; }
     [ObservableProperty] public partial string ParameterText { get; set; } = "";
     [ObservableProperty] public partial bool IsInvokeEnabled { get; set; }
     [ObservableProperty] public partial string? InvokeUnavailableReason { get; set; }
     [ObservableProperty] public partial string InvokeStatus { get; set; } = "";
 
-    public string ParameterHint => ArgumentType is { } type ? DlmsValueEditor.Hint(type) : "Выберите тип параметра.";
+    public bool ShowParameterValue => ArgumentType is not null and not DlmsType.Null;
+    public string ParameterHint => ArgumentType switch
+    {
+        DlmsType.Null => "Будет передан null.",
+        { } type => DlmsValueEditor.Hint(type),
+        _ => "Выберите тип параметра."
+    };
+
+    internal DlmsValue? CreateArgument(ProtocolLimits limits) => IncludeParameter
+        ? ArgumentType switch
+        {
+            DlmsType.Null => DlmsValue.Null,
+            { } type => DlmsValueEditor.Parse(type, ParameterText, limits),
+            _ => throw new FormatException("Выберите тип параметра.")
+        }
+        : null;
 }

@@ -5,20 +5,6 @@
              xmlns:views="using:EMCLDesktop.Views"
              x:Class="EMCLDesktop.Views.MainView"
              x:DataType="vm:MainViewModel">
-    <UserControl.Resources>
-        <DataTemplate x:Key="ReadNumericValueTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
-            <StackPanel Spacing="2">
-                <SelectableTextBlock Text="{Binding DisplayedValue}" FontSize="14" TextWrapping="Wrap" />
-                <SelectableTextBlock Text="{Binding NumericHexValue}" Classes="muted" FontSize="11"
-                                     Foreground="#ACBED3" TextWrapping="Wrap" />
-            </StackPanel>
-        </DataTemplate>
-        <DataTemplate x:Key="ReadOctetValueTemplate" x:DataType="vm:DlmsValuePreviewViewModel">
-            <views:OctetStringField Text="{Binding DisplayedValue, Mode=OneWay}"
-                                    Format="{Binding ReadOctetFormat, Mode=TwoWay}"
-                                    Previews="{Binding ReadOctetPreviews}" />
-        </DataTemplate>
-    </UserControl.Resources>
     <UserControl.Styles>
         <StyleInclude Source="/Styles/CommonStyles.axaml" />
         <Style Selector="ToggleButton.regex-toggle">
@@ -91,8 +77,9 @@
         <Style Selector="Button.object-row">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="12,8" />
-            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Padding" Value="22,3" />
+            <Setter Property="MinHeight" Value="25" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Cursor" Value="Hand" />
@@ -119,6 +106,8 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
         </Style>
         <Style Selector="Expander.object-group /template/ Border#ExpanderContent">
             <Setter Property="Background" Value="Transparent" />
@@ -128,10 +117,23 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="MinHeight" Value="28" />
         </Style>
-        <Style Selector="TreeView.value-tree TreeViewItem" x:DataType="vm:DlmsValueNodeViewModel">
-            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-            <Setter Property="Padding" Value="0" />
+        <Style Selector="Grid.member-row > TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style Selector="Button.member-action">
+            <Setter Property="Padding" Value="9,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="30" />
+        </Style>
+        <Style Selector="Button.value-summary">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#69C4E1" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="FontSize" Value="12" />
         </Style>
         <Style Selector="Button.settings-navigation">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -190,7 +192,8 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid ColumnDefinitions="56,*" RowDefinitions="*,Auto" Background="{StaticResource WorkspaceContentBackground}">
+    <Grid>
+    <Grid x:Name="Workspace" ColumnDefinitions="56,*" RowDefinitions="*,Auto" Background="{StaticResource WorkspaceContentBackground}">
         <Border Grid.RowSpan="2" Background="{StaticResource WorkspaceNavigationBackground}" BorderBrush="{StaticResource WorkspaceDividerBrush}" BorderThickness="0,0,1,0" Padding="7,8,8,12">
             <Grid RowDefinitions="Auto,*,Auto">
                 <StackPanel Spacing="4">
@@ -231,17 +234,17 @@
             </Grid>
         </Border>
         <Grid Grid.Column="1">
-            <Grid IsVisible="{Binding IsObjectsTab}" ColumnDefinitions="300,*">
+            <Grid IsVisible="{Binding IsObjectsTab}" ColumnDefinitions="270,*">
                 <Border Grid.Column="0" Classes="workspace-sidebar" Padding="0">
                     <Grid RowDefinitions="Auto,Auto,*">
-                        <StackPanel Grid.Row="0" Spacing="12" Margin="16,16,16,12">
+                        <StackPanel Grid.Row="0" Spacing="7" Margin="11,10,11,8">
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0" Text="Каталог OBIS" Classes="section-title" />
                                 <TextBlock Grid.Column="1" Text="{Binding VisibleObjectCount}"
                                            Foreground="#69C4E1" FontWeight="SemiBold"
                                            VerticalAlignment="Center" />
                             </Grid>
-                            <Button Content="Считать дерево" Classes="secondary"
+                            <Button Content="Считать дерево" Classes="secondary member-action"
                                     Command="{Binding ReadTreeCommand}" HorizontalAlignment="Stretch" />
                             <TextBox x:Name="ObjectSearchBox" Text="{Binding SearchText}" PlaceholderText="OBIS, класс или ID">
                                 <TextBox.InnerRightContent>
@@ -252,6 +255,15 @@
                                                   AutomationProperties.Name="Регулярное выражение" />
                                 </TextBox.InnerRightContent>
                             </TextBox>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="6"
+                                  IsEnabled="{Binding CanSelectObjects}">
+                                <Button Content="Свернуть все" Classes="secondary member-action"
+                                        Command="{Binding CollapseAllGroupsCommand}"
+                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                <Button Grid.Column="1" Content="Развернуть все" Classes="secondary member-action"
+                                        Command="{Binding ExpandAllGroupsCommand}"
+                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                            </Grid>
                             <TextBlock Text="{Binding SearchError}" Foreground="#FF9E9E"
                                        IsVisible="{Binding SearchError, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}"
                                        TextWrapping="Wrap" FontSize="12" />
@@ -263,14 +275,15 @@
                                           IsEnabled="{Binding CanSelectObjects}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:ObjectGroupViewModel">
-                                        <Expander Classes="object-group" IsExpanded="True" Margin="0,0,0,10">
+                                        <Expander Classes="object-group" IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                  ToolTip.Tip="{Binding Subtitle}">
                                             <Expander.Header>
-                                                <StackPanel Spacing="2">
-                                                    <TextBlock Text="{Binding ClassName}" FontWeight="SemiBold"
-                                                               TextWrapping="Wrap" />
-                                                    <TextBlock Text="{Binding Subtitle}" Classes="muted" FontSize="11"
-                                                               TextWrapping="Wrap" />
-                                                </StackPanel>
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="7">
+                                                    <TextBlock Text="{Binding ClassName}" FontSize="13" FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Count}" Classes="muted"
+                                                               FontSize="11" VerticalAlignment="Center" />
+                                                </Grid>
                                             </Expander.Header>
                                             <ItemsControl ItemsSource="{Binding Objects}" HorizontalAlignment="Stretch">
                                                 <ItemsControl.ItemTemplate>
@@ -278,8 +291,7 @@
                                                         <Button Classes="object-row"
                                                                 Classes.selected="{Binding IsSelected}"
                                                                 Click="SelectObjectClick">
-                                                            <TextBlock Text="{Binding Obis}" FontSize="13"
-                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Obis}" FontSize="12" />
                                                         </Button>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
@@ -292,413 +304,312 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Column="1" Classes="workspace-content" Padding="0">
-                    <Grid RowDefinitions="Auto,*">
-                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="20,16">
-                            <StackPanel Grid.Column="0" Spacing="3">
-                                <TextBlock Text="Сведения об объекте" Classes="section-title" />
-                                <TextBlock Text="Атрибуты, значения и методы" Classes="muted" FontSize="12" />
-                            </StackPanel>
-                            <Button Grid.Column="1" Classes="primary" Content="Считать все атрибуты"
-                                    Command="{Binding ReadSelectedObjectCommand}"
-                                    VerticalAlignment="Center" />
-                        </Grid>
-                        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel Margin="20,0,20,20" Spacing="12">
-                                <Border Height="1" Background="#293A52" />
-                                <TextBlock Text="Выберите OBIS в каталоге. Значения читаются по кнопке."
-                                           Classes="muted" Margin="0,24" TextAlignment="Center"
-                                           IsVisible="{Binding HasNoSelectedObject}" />
-                                <ContentControl Content="{Binding SelectedObject}">
-                                    <ContentControl.ContentTemplate>
-                                        <DataTemplate x:DataType="vm:MeterObjectViewModel">
-                                            <StackPanel Spacing="18">
-                                                <StackPanel Spacing="7">
-                                                    <TextBlock Text="{Binding Obis}" FontSize="24"
-                                                               FontWeight="SemiBold" Foreground="#F4F7FC"
-                                                               TextWrapping="Wrap" />
-                                                    <TextBlock Text="{Binding ClassName}" FontSize="15"
-                                                               Foreground="#69C4E1" TextWrapping="Wrap" />
-                                                    <StackPanel Orientation="Horizontal" Spacing="16">
-                                                        <TextBlock Text="{Binding ClassId, StringFormat='Класс {0}'}"
-                                                                   Classes="muted" FontSize="12" />
-                                                        <TextBlock Text="{Binding ClassVersion, StringFormat='Версия {0}'}"
-                                                                   Classes="muted" FontSize="12" />
-                                                    </StackPanel>
-                                                </StackPanel>
-                                                <StackPanel Spacing="10">
-                                                    <TextBlock Text="Атрибуты" Classes="section-title" />
-                                                    <ItemsControl ItemsSource="{Binding Attributes}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate x:DataType="vm:AttributeViewModel">
-                                                                <Border Classes="item" Margin="0,0,0,8">
-                                                                    <StackPanel Spacing="10">
-                                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                                            <StackPanel Grid.Column="0" Spacing="3">
-                                                                                <TextBlock Text="{Binding Index, StringFormat='АТРИБУТ {0}'}"
-                                                                                           FontSize="11" FontWeight="Bold"
-                                                                                           Foreground="#69C4E1" />
-                                                                                <TextBlock Text="{Binding Name}" FontSize="15"
-                                                                                           FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                            <Button Grid.Column="1" Classes="secondary" Content="Считать"
-                                                                                    IsEnabled="{Binding IsReadEnabled}"
-                                                                                    Click="ReadAttributeClick"
-                                                                                    VerticalAlignment="Center" />
-                                                                        </Grid>
-                                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                                                            <StackPanel Grid.Column="0" Spacing="3">
-                                                                                <TextBlock Text="ТИП" Classes="field-label" />
-                                                                                <TextBlock Text="{Binding Type}" TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                            <StackPanel Grid.Column="1" Spacing="3">
-                                                                                <TextBlock Text="ДОСТУП" Classes="field-label" />
-                                                                                <TextBlock Text="{Binding Access}" TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                        </Grid>
-                                                                        <StackPanel Spacing="4">
-                                                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                                                                <TextBlock Text="ЗНАЧЕНИЕ" Classes="field-label"
-                                                                                           VerticalAlignment="Center" />
-                                                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                                                                    <ToggleSwitch IsVisible="{Binding HasReadValueTree}"
-                                                                                                  IsChecked="{Binding UseTextValueView, Mode=TwoWay}"
-                                                                                                  OffContent="Текст" OnContent="Текст" VerticalAlignment="Center"
-                                                                                                  AutomationProperties.Name="Текстовый вид значения"
-                                                                                                  ToolTip.Tip="Переключить между деревом и текстом" />
-                                                                                    <Button Content="{Binding WriteEditorAction}"
-                                                                                            Classes="secondary" IsEnabled="{Binding CanToggleWriteEditor}"
-                                                                                            ToolTip.Tip="{Binding WriteUnavailableReason}"
-                                                                                            ToolTip.ServiceEnabled="{Binding !IsWriteEditorOpen}"
-                                                                                            ToolTip.ShowOnDisabled="True" Click="ToggleWriteEditorClick" />
-                                                                                </StackPanel>
-                                                                            </Grid>
-                                                                            <ContentControl IsVisible="{Binding HasReadFormats}" Content="{Binding .}"
-                                                                                            ContentTemplate="{StaticResource ReadOctetValueTemplate}" />
-                                                                            <Border IsVisible="{Binding HasReadNumber}" Padding="10,6"
-                                                                                    MinHeight="42" Background="#172438" CornerRadius="4"
-                                                                                    BorderBrush="#31435B" BorderThickness="1">
-                                                                                <ContentControl Content="{Binding .}" ContentTemplate="{StaticResource ReadNumericValueTemplate}" />
-                                                                            </Border>
-                                                                            <StackPanel IsVisible="{Binding !HasReadFormats}">
-                                                                                <StackPanel IsVisible="{Binding !HasReadNumber}">
-                                                                                    <TextBox Text="{Binding DisplayedValue, Mode=OneWay}"
-                                                                                             IsVisible="{Binding !ShowReadValueTree}"
-                                                                                             IsReadOnly="True" AcceptsReturn="True"
-                                                                                             TextWrapping="Wrap" MinHeight="42"
-                                                                                             MaxHeight="180"
-                                                                                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
-                                                                                </StackPanel>
-                                                                            </StackPanel>
-                                                                            <TreeView Classes="value-tree" ItemsSource="{Binding ReadValueNodes}"
-                                                                                      IsVisible="{Binding ShowReadValueTree}"
-                                                                                      MaxHeight="300" Background="#172438"
-                                                                                      BorderBrush="#31435B" BorderThickness="1"
-                                                                                      AutomationProperties.Name="Дерево считанного значения"
-                                                                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                                                      ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                                                                <TreeView.ItemTemplate>
-                                                                                    <TreeDataTemplate x:DataType="vm:DlmsValueNodeViewModel"
-                                                                                                      ItemsSource="{Binding Children}">
-                                                                                        <StackPanel Margin="4" Spacing="4">
-                                                                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
-                                                                                            <ContentControl IsVisible="{Binding HasReadFormats}" Content="{Binding .}"
-                                                                                                            ContentTemplate="{StaticResource ReadOctetValueTemplate}" />
-                                                                                            <StackPanel IsVisible="{Binding !HasReadFormats}">
-                                                                                                <ContentControl IsVisible="{Binding HasReadNumber}" Content="{Binding .}"
-                                                                                                                ContentTemplate="{StaticResource ReadNumericValueTemplate}" />
-                                                                                                <StackPanel IsVisible="{Binding !HasReadNumber}">
-                                                                                                    <SelectableTextBlock IsVisible="{Binding IsScalar}" Text="{Binding DisplayedValue}"
-                                                                                                                         TextWrapping="Wrap" />
-                                                                                                </StackPanel>
-                                                                                            </StackPanel>
-                                                                                        </StackPanel>
-                                                                                    </TreeDataTemplate>
-                                                                                </TreeView.ItemTemplate>
-                                                                            </TreeView>
-                                                                        </StackPanel>
-                                                                        <Border IsVisible="{Binding IsWriteEditorOpen}"
-                                                                                BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="0,10,0,0">
-                                                                            <Border.Resources>
-                                                                                <SolidColorBrush x:Key="TextControlBackground" Color="#0D1726" />
-                                                                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#172438" />
-                                                                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#122136" />
-                                                                                <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#172438" />
-                                                                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="#31435B" />
-                                                                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#536F8B" />
-                                                                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#69C4E1" />
-                                                                                <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#293A52" />
-                                                                                <SolidColorBrush x:Key="TextControlForeground" Color="#E7EFF8" />
-                                                                                <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#E7EFF8" />
-                                                                                <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#E7EFF8" />
-                                                                                <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#8296AE" />
-                                                                                <SolidColorBrush x:Key="ComboBoxBackground" Color="#22344C" />
-                                                                                <SolidColorBrush x:Key="ComboBoxBackgroundUnfocused" Color="#22344C" />
-                                                                                <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#273B53" />
-                                                                                <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#214A61" />
-                                                                                <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#172438" />
-                                                                                <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#172438" />
-                                                                                <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#31435B" />
-                                                                                <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#273B53" />
-                                                                                <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#214A61" />
-                                                                                <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#214A61" />
-                                                                                <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#273B53" />
-                                                                                <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#1D526C" />
-                                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#2A7898" />
-                                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1D526C" />
-                                                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#172438" />
-                                                                                <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#8296AE" />
-                                                                            </Border.Resources>
-                                                                            <StackPanel Spacing="8" IsEnabled="{Binding IsReadEnabled}">
-                                                                                <TextBlock Text="Тип для записи" Classes="field-label" />
-                                                                                <ComboBox ItemsSource="{Binding WriteTypes}"
-                                                                                          SelectedItem="{Binding WriteType, Mode=TwoWay}"
-                                                                                          PlaceholderText="Выберите тип" MinWidth="180" />
-                                                                                <TextBlock Text="{Binding WriteHint}" Classes="muted" FontSize="12" />
-                                                                                <TextBlock Text="Новое значение" Classes="field-label" />
-                                                                                <views:OctetStringField IsVisible="{Binding IsWritingOctets}" IsReadOnly="False"
-                                                                                                        Text="{Binding WriteText, Mode=TwoWay}"
-                                                                                                        Format="{Binding WriteOctetFormat, Mode=OneWay}"
-                                                                                                        Previews="{Binding WriteOctetPreviews}"
-                                                                                                        FormatRequested="WriteOctetFormatRequested" />
-                                                                                <TextBox IsVisible="{Binding !IsWritingOctets}" Text="{Binding WriteText, Mode=TwoWay}"
-                                                                                         AutomationProperties.Name="Новое значение"
-                                                                                         AcceptsReturn="True" TextWrapping="Wrap"
-                                                                                         MinHeight="70" MaxHeight="240"
-                                                                                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
-                                                                                <WrapPanel Orientation="Horizontal">
-                                                                                    <Button Content="Из считанного" Classes="secondary" Margin="0,0,8,8"
-                                                                                            IsEnabled="{Binding CanUseReadValue}"
-                                                                                            Click="UseReadValueClick" />
-                                                                                    <Button Content="Записать в счётчик" Classes="primary" Margin="0,0,0,8"
-                                                                                            IsEnabled="{Binding IsWriteEnabled}"
-                                                                                            Click="WriteAttributeClick" />
-                                                                                </WrapPanel>
-                                                                                <TextBlock Text="{Binding WriteUnavailableReason}" Classes="muted" FontSize="12" />
-                                                                                <TextBlock Text="{Binding WriteStatus}" TextWrapping="Wrap" Foreground="#69C4E1" />
-                                                                            </StackPanel>
-                                                                        </Border>
-                                                                    </StackPanel>
-                                                                </Border>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </StackPanel>
-                                                <Border Classes="item" IsVisible="{Binding IsProfileGeneric}">
-                                                    <StackPanel Spacing="12">
-                                                        <TextBlock Text="Таблица Profile Generic" Classes="section-title" />
-                                                        <TextBlock Text="Выберите способ чтения. Диапазон применяет сам счётчик."
-                                                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
-                                                        <ComboBox ItemsSource="{Binding ProfileReadModes}"
-                                                                  SelectedItem="{Binding SelectedProfileReadMode}"
-                                                                  IsEnabled="{Binding IsProfileReadEnabled}"
-                                                                  HorizontalAlignment="Stretch" />
-                                                        <StackPanel Spacing="5" IsVisible="{Binding IsProfileCountMode}">
-                                                            <TextBlock Text="Количество записей" Classes="field-label" />
-                                                            <TextBox Text="{Binding ProfileCountText}"
-                                                                     PlaceholderText="10" IsEnabled="{Binding IsProfileReadEnabled}" />
-                                                        </StackPanel>
-                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10"
-                                                              IsVisible="{Binding IsProfileEntryRangeMode}">
-                                                            <StackPanel Grid.Column="0" Spacing="5">
-                                                                <TextBlock Text="С записи" Classes="field-label" />
-                                                                <TextBox Text="{Binding ProfileFirstEntryText}"
-                                                                         PlaceholderText="1" IsEnabled="{Binding IsProfileReadEnabled}" />
+                <Border Grid.Column="1" Classes="workspace-content" Padding="20,16">
+                    <Grid>
+                        <TextBlock Text="Выберите OBIS в каталоге." Classes="muted" Margin="0,24"
+                                   HorizontalAlignment="Center" IsVisible="{Binding HasNoSelectedObject}" />
+                        <ContentControl Content="{Binding SelectedObject}">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate x:DataType="vm:MeterObjectViewModel">
+                                    <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+                                        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Obis}" FontSize="24" FontWeight="SemiBold"
+                                                       Foreground="#F4F7FC" Margin="0,0,14,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding ClassName}" Foreground="#69C4E1"
+                                                       Margin="0,0,14,0" VerticalAlignment="Center" />
+                                            <TextBlock Classes="muted" FontSize="12"
+                                                       Text="{Binding ClassId, StringFormat='Класс {0}'}"
+                                                       Margin="0,0,8,0" VerticalAlignment="Center" />
+                                            <TextBlock Classes="muted" FontSize="12"
+                                                       Text="{Binding ClassVersion, StringFormat='Версия {0}'}"
+                                                       VerticalAlignment="Center" />
+                                        </WrapPanel>
+                                        <TabStrip Grid.Row="1" IsVisible="{Binding IsProfileGeneric}"
+                                                  SelectedIndex="{Binding ProfileModeIndex, Mode=TwoWay}"
+                                                  AutomationProperties.Name="Режим Profile Generic">
+                                            <TabStrip.ItemsPanel>
+                                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                            </TabStrip.ItemsPanel>
+                                            <TabStripItem Content="Обычный режим" />
+                                            <TabStripItem Content="Продвинутый режим" />
+                                        </TabStrip>
+                                        <WrapPanel Grid.Row="2" HorizontalAlignment="Right" IsVisible="{Binding ShowObjectMembers}">
+                                            <Button Classes="secondary member-action" Content="Считать все атрибуты"
+                                                    Margin="0,0,8,4" Command="{Binding $parent[views:MainView].((vm:MainViewModel)DataContext).ReadSelectedObjectCommand}" />
+                                            <Button Classes="primary member-action" Margin="0,0,0,4"
+                                                    Content="{Binding $parent[views:MainView].((vm:MainViewModel)DataContext).WritePendingText}"
+                                                    Command="{Binding $parent[views:MainView].((vm:MainViewModel)DataContext).WritePendingCommand}" />
+                                        </WrapPanel>
+                                        <ScrollViewer Grid.Row="3" HorizontalScrollBarVisibility="Disabled">
+                                            <Grid x:Name="MemberViewport">
+                                                <StackPanel Spacing="12" IsVisible="{Binding ShowProfileRecords}">
+                                                    <Border Classes="item" Padding="12">
+                                                        <WrapPanel>
+                                                            <StackPanel Spacing="5" Margin="0,0,12,8">
+                                                                <TextBlock Text="Способ чтения" Classes="field-label" />
+                                                                <ComboBox ItemsSource="{Binding ProfileReadModes}"
+                                                                          SelectedItem="{Binding SelectedProfileReadMode}"
+                                                                          IsEnabled="{Binding IsProfileReadEnabled}"
+                                                                          HorizontalAlignment="Stretch" />
                                                             </StackPanel>
-                                                            <StackPanel Grid.Column="1" Spacing="5">
-                                                                <TextBlock Text="По запись" Classes="field-label" />
-                                                                <TextBox Text="{Binding ProfileLastEntryText}"
+                                                            <StackPanel Spacing="5" Width="122" Margin="0,0,12,8" IsVisible="{Binding IsProfileCountMode}">
+                                                                <TextBlock Text="Количество записей" Classes="field-label" />
+                                                                <TextBox Text="{Binding ProfileCountText}"
                                                                          PlaceholderText="10" IsEnabled="{Binding IsProfileReadEnabled}" />
                                                             </StackPanel>
-                                                        </Grid>
-                                                        <StackPanel Spacing="8" IsVisible="{Binding IsProfileDateRangeMode}">
-                                                            <TextBlock Text="Столбец времени" Classes="field-label" />
-                                                            <ComboBox ItemsSource="{Binding ProfileCaptureColumns}"
-                                                                      SelectedItem="{Binding SelectedProfileCaptureColumn}"
-                                                                      IsEnabled="{Binding IsProfileReadEnabled}"
-                                                                      HorizontalAlignment="Stretch">
-                                                                <ComboBox.ItemTemplate>
-                                                                    <DataTemplate x:DataType="vm:ProfileCaptureColumnViewModel">
-                                                                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
-                                                                    </DataTemplate>
-                                                                </ComboBox.ItemTemplate>
-                                                            </ComboBox>
-                                                            <TextBlock Text="Столбцы появятся после чтения capture_objects."
-                                                                       Classes="muted" FontSize="11" TextWrapping="Wrap" />
-                                                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10" Width="210" Margin="0,0,12,8"
+                                                                  IsVisible="{Binding IsProfileEntryRangeMode}">
                                                                 <StackPanel Grid.Column="0" Spacing="5">
-                                                                    <TextBlock Text="С даты" Classes="field-label" />
-                                                                    <DatePicker SelectedDate="{Binding ProfileFromDate}"
-                                                                                IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    <TextBlock Text="С записи" Classes="field-label" />
+                                                                    <TextBox Text="{Binding ProfileFirstEntryText}"
+                                                                             PlaceholderText="1" IsEnabled="{Binding IsProfileReadEnabled}" />
                                                                 </StackPanel>
                                                                 <StackPanel Grid.Column="1" Spacing="5">
-                                                                    <TextBlock Text="По дату" Classes="field-label" />
-                                                                    <DatePicker SelectedDate="{Binding ProfileToDate}"
-                                                                                IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    <TextBlock Text="По запись" Classes="field-label" />
+                                                                    <TextBox Text="{Binding ProfileLastEntryText}"
+                                                                             PlaceholderText="10" IsEnabled="{Binding IsProfileReadEnabled}" />
                                                                 </StackPanel>
                                                             </Grid>
-                                                            <StackPanel Spacing="5">
-                                                                <TextBlock Text="Часовой пояс счётчика" Classes="field-label" />
-                                                                <TextBox Text="{Binding ProfileTimeZone}" PlaceholderText="+03:00"
-                                                                         IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                            <StackPanel Spacing="8" Margin="0,0,12,8" IsVisible="{Binding IsProfileDateRangeMode}">
+                                                                <TextBlock Text="Столбец времени" Classes="field-label" />
+                                                                <ComboBox ItemsSource="{Binding ProfileCaptureColumns}"
+                                                                          SelectedItem="{Binding SelectedProfileCaptureColumn}"
+                                                                          IsEnabled="{Binding IsProfileReadEnabled}"
+                                                                          HorizontalAlignment="Stretch">
+                                                                    <ComboBox.ItemTemplate>
+                                                                        <DataTemplate x:DataType="vm:ProfileCaptureColumnViewModel">
+                                                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                                                                        </DataTemplate>
+                                                                    </ComboBox.ItemTemplate>
+                                                                </ComboBox>
+                                                                <TextBlock Text="Сначала считайте профиль, чтобы загрузить список столбцов."
+                                                                           Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                                                    <StackPanel Grid.Column="0" Spacing="5">
+                                                                        <TextBlock Text="С даты" Classes="field-label" />
+                                                                        <DatePicker SelectedDate="{Binding ProfileFromDate}"
+                                                                                    IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="1" Spacing="5">
+                                                                        <TextBlock Text="По дату" Classes="field-label" />
+                                                                        <DatePicker SelectedDate="{Binding ProfileToDate}"
+                                                                                    IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                                <StackPanel Spacing="5">
+                                                                    <TextBlock Text="Часовой пояс счётчика" Classes="field-label" />
+                                                                    <TextBox Text="{Binding ProfileTimeZone}" PlaceholderText="+03:00"
+                                                                             IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                                </StackPanel>
                                                             </StackPanel>
-                                                        </StackPanel>
-                                                        <Button Content="Считать профиль" Click="ReadProfileClick"
-                                                                IsEnabled="{Binding IsProfileReadEnabled}" />
-                                                        <TextBlock Text="{Binding ProfileTableStatus}" Classes="muted"
-                                                                   FontSize="12" />
-                                                        <ContentControl Content="{Binding ProfileTable}">
-                                                            <ContentControl.ContentTemplate>
-                                                                <DataTemplate x:DataType="vm:ProfileTableViewModel">
-                                                                    <StackPanel Spacing="8">
-                                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-                                                                        <TextBlock Grid.Column="0" Text="{Binding PageSummary}"
-                                                                                   Classes="muted" FontSize="12"
-                                                                                   VerticalAlignment="Center" />
-                                                                        <Button Grid.Column="1" Content="Назад" Classes="secondary"
-                                                                                IsEnabled="{Binding CanPreviousPage}"
-                                                                                Click="ProfilePreviousPageClick" />
-                                                                        <Button Grid.Column="2" Content="Далее" Classes="secondary"
-                                                                                IsEnabled="{Binding CanNextPage}"
-                                                                                Click="ProfileNextPageClick" />
-                                                                    </Grid>
-                                                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                                                                  VerticalScrollBarVisibility="Disabled">
-                                                                        <StackPanel Spacing="0">
-                                                                            <StackPanel Orientation="Horizontal">
-                                                                                <Border Width="50" MinHeight="66"
-                                                                                        Background="#214A61" Padding="8"
-                                                                                        BorderBrush="#31435B" BorderThickness="1">
-                                                                                    <TextBlock Text="№" FontWeight="Bold" />
-                                                                                </Border>
-                                                                                <ItemsControl ItemsSource="{Binding Columns}">
-                                                                                    <ItemsControl.ItemsPanel>
-                                                                                        <ItemsPanelTemplate>
-                                                                                            <StackPanel Orientation="Horizontal" />
-                                                                                        </ItemsPanelTemplate>
-                                                                                    </ItemsControl.ItemsPanel>
-                                                                                    <ItemsControl.ItemTemplate>
-                                                                                        <DataTemplate x:DataType="vm:ProfileColumnViewModel">
-                                                                                            <Border Width="220" MinHeight="66"
-                                                                                                    Background="#214A61" Padding="8"
-                                                                                                    BorderBrush="#31435B" BorderThickness="1">
-                                                                                                <StackPanel Spacing="3">
-                                                                                                    <TextBlock Text="{Binding Obis}"
-                                                                                                               FontWeight="SemiBold"
-                                                                                                               TextWrapping="Wrap" />
-                                                                                                    <TextBlock Text="{Binding Name}"
-                                                                                                               Classes="muted" FontSize="12"
-                                                                                                               TextWrapping="Wrap" />
-                                                                                                    <ComboBox IsVisible="{Binding HasOctets}"
-                                                                                                              ItemsSource="{Binding OctetFormats}"
-                                                                                                              SelectedItem="{Binding OctetFormat, Mode=TwoWay}"
-                                                                                                              HorizontalAlignment="Stretch"
-                                                                                                              MaxDropDownHeight="320"
-                                                                                                              AutomationProperties.Name="Кодировка столбца OctetString"
-                                                                                                              ToolTip.Tip="Формат всех значений OctetString в столбце" />
-                                                                                                </StackPanel>
-                                                                                            </Border>
-                                                                                        </DataTemplate>
-                                                                                    </ItemsControl.ItemTemplate>
-                                                                                </ItemsControl>
-                                                                            </StackPanel>
-                                                                            <ItemsControl ItemsSource="{Binding Rows}">
+                                                            <Button Content="Считать профиль" Classes="primary member-action" VerticalAlignment="Top" Margin="0,21,0,8" Click="ReadProfileClick"
+                                                                    IsEnabled="{Binding IsProfileReadEnabled}" />
+                                                        </WrapPanel>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding ProfileTableStatus}" Classes="muted"
+                                                               FontSize="12" />
+                                                    <ContentControl Content="{Binding ProfileTable}">
+                                                        <ContentControl.ContentTemplate>
+                                                            <DataTemplate x:DataType="vm:ProfileTableViewModel">
+                                                                <StackPanel Spacing="8">
+                                                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                                    <TextBlock Grid.Column="0" Text="{Binding PageSummary}"
+                                                                               Classes="muted" FontSize="12"
+                                                                               VerticalAlignment="Center" />
+                                                                    <Button Grid.Column="1" Content="Назад" Classes="secondary"
+                                                                            IsEnabled="{Binding CanPreviousPage}"
+                                                                            Click="ProfilePreviousPageClick" />
+                                                                    <Button Grid.Column="2" Content="Далее" Classes="secondary"
+                                                                            IsEnabled="{Binding CanNextPage}"
+                                                                            Click="ProfileNextPageClick" />
+                                                                </Grid>
+                                                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                                              VerticalScrollBarVisibility="Disabled">
+                                                                    <StackPanel Spacing="0">
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <Border Width="50" MinHeight="66"
+                                                                                    Background="#214A61" Padding="8"
+                                                                                    BorderBrush="#31435B" BorderThickness="1">
+                                                                                <TextBlock Text="№" FontWeight="Bold" />
+                                                                            </Border>
+                                                                            <ItemsControl ItemsSource="{Binding Columns}">
+                                                                                <ItemsControl.ItemsPanel>
+                                                                                    <ItemsPanelTemplate>
+                                                                                        <StackPanel Orientation="Horizontal" />
+                                                                                    </ItemsPanelTemplate>
+                                                                                </ItemsControl.ItemsPanel>
                                                                                 <ItemsControl.ItemTemplate>
-                                                                                    <DataTemplate x:DataType="vm:ProfileRowViewModel">
-                                                                                        <StackPanel Orientation="Horizontal">
-                                                                                            <Border Width="50" MinHeight="42" Padding="8"
-                                                                                                    Background="#172438"
-                                                                                                    BorderBrush="#31435B" BorderThickness="1">
-                                                                                                <TextBlock Text="{Binding Number}"
-                                                                                                           Classes="muted" />
-                                                                                            </Border>
-                                                                                            <ItemsControl ItemsSource="{Binding Cells}">
-                                                                                                <ItemsControl.ItemsPanel>
-                                                                                                    <ItemsPanelTemplate>
-                                                                                                        <StackPanel Orientation="Horizontal" />
-                                                                                                    </ItemsPanelTemplate>
-                                                                                                </ItemsControl.ItemsPanel>
-                                                                                                <ItemsControl.ItemTemplate>
-                                                                                                    <DataTemplate x:DataType="vm:ProfileCellViewModel">
-                                                                                                        <Border Width="220" MinHeight="42"
-                                                                                                                Padding="8" Background="#172438"
-                                                                                                                BorderBrush="#31435B"
-                                                                                                                BorderThickness="1">
-                                                                                                            <StackPanel Spacing="2">
-                                                                                                                <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
-                                                                                                                <TextBlock Text="{Binding NumericHexValue}" IsVisible="{Binding HasNumber}"
-                                                                                                                           Classes="muted" FontSize="11" TextWrapping="Wrap" />
-                                                                                                            </StackPanel>
-                                                                                                        </Border>
-                                                                                                    </DataTemplate>
-                                                                                                </ItemsControl.ItemTemplate>
-                                                                                            </ItemsControl>
-                                                                                        </StackPanel>
+                                                                                    <DataTemplate x:DataType="vm:ProfileColumnViewModel">
+                                                                                        <Border Width="220" MinHeight="66"
+                                                                                                Background="#214A61" Padding="8"
+                                                                                                BorderBrush="#31435B" BorderThickness="1">
+                                                                                            <StackPanel Spacing="3">
+                                                                                                <TextBlock Text="{Binding Obis}"
+                                                                                                           FontWeight="SemiBold"
+                                                                                                           TextWrapping="Wrap" />
+                                                                                                <TextBlock Text="{Binding Name}"
+                                                                                                           Classes="muted" FontSize="12"
+                                                                                                           TextWrapping="Wrap" />
+                                                                                                <ComboBox IsVisible="{Binding HasOctets}"
+                                                                                                          ItemsSource="{Binding OctetFormats}"
+                                                                                                          SelectedItem="{Binding OctetFormat, Mode=TwoWay}"
+                                                                                                          HorizontalAlignment="Stretch"
+                                                                                                          MaxDropDownHeight="320"
+                                                                                                          AutomationProperties.Name="Кодировка столбца OctetString"
+                                                                                                          ToolTip.Tip="Формат всех значений OctetString в столбце" />
+                                                                                            </StackPanel>
+                                                                                        </Border>
                                                                                     </DataTemplate>
                                                                                 </ItemsControl.ItemTemplate>
                                                                             </ItemsControl>
                                                                         </StackPanel>
-                                                                    </ScrollViewer>
+                                                                        <ItemsControl ItemsSource="{Binding Rows}">
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate x:DataType="vm:ProfileRowViewModel">
+                                                                                    <StackPanel Orientation="Horizontal">
+                                                                                        <Border Width="50" MinHeight="42" Padding="8"
+                                                                                                Background="#172438"
+                                                                                                BorderBrush="#31435B" BorderThickness="1">
+                                                                                            <TextBlock Text="{Binding Number}"
+                                                                                                       Classes="muted" />
+                                                                                        </Border>
+                                                                                        <ItemsControl ItemsSource="{Binding Cells}">
+                                                                                            <ItemsControl.ItemsPanel>
+                                                                                                <ItemsPanelTemplate>
+                                                                                                    <StackPanel Orientation="Horizontal" />
+                                                                                                </ItemsPanelTemplate>
+                                                                                            </ItemsControl.ItemsPanel>
+                                                                                            <ItemsControl.ItemTemplate>
+                                                                                                <DataTemplate x:DataType="vm:ProfileCellViewModel">
+                                                                                                    <Border Width="220" MinHeight="42"
+                                                                                                            Padding="8" Background="#172438"
+                                                                                                            BorderBrush="#31435B"
+                                                                                                            BorderThickness="1">
+                                                                                                        <StackPanel Spacing="2">
+                                                                                                            <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                                                                                                            <TextBlock Text="{Binding NumericHexValue}" IsVisible="{Binding HasNumber}"
+                                                                                                                       Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                                                                                                        </StackPanel>
+                                                                                                    </Border>
+                                                                                                </DataTemplate>
+                                                                                            </ItemsControl.ItemTemplate>
+                                                                                        </ItemsControl>
+                                                                                    </StackPanel>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
                                                                     </StackPanel>
-                                                                </DataTemplate>
-                                                            </ContentControl.ContentTemplate>
-                                                        </ContentControl>
-                                                    </StackPanel>
-                                                </Border>
-                                                <StackPanel Spacing="10">
-                                                    <TextBlock Text="Методы" Classes="section-title" />
-                                                    <ItemsControl ItemsSource="{Binding Methods}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate x:DataType="vm:MethodViewModel">
-                                                                <Border Classes="item" Margin="0,0,0,8">
-                                                                    <StackPanel Spacing="6">
-                                                                        <TextBlock Text="{Binding Index, StringFormat='МЕТОД {0}'}"
-                                                                                   FontSize="11" FontWeight="Bold"
-                                                                                   Foreground="#69C4E1" />
-                                                                        <TextBlock Text="{Binding Name}" FontSize="15"
-                                                                                   FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                                        <TextBlock Text="{Binding ParameterType}" Classes="muted" />
-                                                                        <TextBlock Text="{Binding Access}" TextWrapping="Wrap" />
-                                                                        <TextBlock Text="{Binding InvokeUnavailableReason}" Classes="muted" FontSize="12"
-                                                                                   IsVisible="{Binding InvokeUnavailableReason, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
-                                                                        <Expander Header="Вызов метода" IsEnabled="{Binding IsInvokeEnabled}"
-                                                                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                                                                            <StackPanel Spacing="8">
-                                                                                <CheckBox Content="Передать параметр"
-                                                                                          IsChecked="{Binding IncludeParameter, Mode=TwoWay}" />
-                                                                                <StackPanel Spacing="6" IsVisible="{Binding IncludeParameter}">
-                                                                                    <TextBlock Text="Тип параметра" Classes="field-label" />
-                                                                                    <ComboBox ItemsSource="{Binding ParameterTypes}"
-                                                                                              SelectedItem="{Binding ArgumentType, Mode=TwoWay}"
-                                                                                              AutomationProperties.Name="Тип параметра"
-                                                                                              PlaceholderText="Выберите тип" />
-                                                                                    <TextBlock Text="{Binding ParameterHint}" Classes="muted" FontSize="12" />
-                                                                                    <TextBox Text="{Binding ParameterText, Mode=TwoWay}"
-                                                                                             AutomationProperties.Name="Значение параметра"
-                                                                                             AcceptsReturn="True" TextWrapping="Wrap"
-                                                                                             MinHeight="44" MaxHeight="200"
-                                                                                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
-                                                                                </StackPanel>
-                                                                                <Button Content="Вызвать метод" Classes="primary" Click="InvokeMethodClick" />
-                                                                            </StackPanel>
-                                                                        </Expander>
-                                                                        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto"
-                                                                                      IsVisible="{Binding InvokeStatus, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}"
-                                                                                      HorizontalScrollBarVisibility="Disabled">
-                                                                            <SelectableTextBlock Text="{Binding InvokeStatus}" TextWrapping="Wrap" Foreground="#69C4E1" />
-                                                                        </ScrollViewer>
-                                                                    </StackPanel>
-                                                                </Border>
+                                                                </ScrollViewer>
+                                                                </StackPanel>
                                                             </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
+                                                        </ContentControl.ContentTemplate>
+                                                    </ContentControl>
                                                 </StackPanel>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ContentControl.ContentTemplate>
-                                </ContentControl>
-                            </StackPanel>
-                        </ScrollViewer>
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                                              IsVisible="{Binding ShowObjectMembers}">
+                                                    <StackPanel Spacing="9" MinWidth="600" Margin="0,0,0,12"
+                                                                Width="{Binding #MemberViewport.Bounds.Width}">
+                                                        <TextBlock Text="Атрибуты" Classes="section-title" />
+                                                        <Border BorderBrush="#31435B" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                                                            <StackPanel>
+                                                                <Border Background="#214A61">
+                                                                    <Grid ColumnDefinitions="28,1.4*,*,*,1.4*,157" ColumnSpacing="8"
+                                                                          Margin="9,7">
+                                                                        <TextBlock Text="№" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="1" Text="Имя" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="2" Text="Тип" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="3" Text="Доступ" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="4" Text="Значение" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="5" Text="Действия" Classes="field-label" HorizontalAlignment="Right" />
+                                                                    </Grid>
+                                                                </Border>
+                                                                <ItemsControl ItemsSource="{Binding Attributes}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate x:DataType="vm:AttributeViewModel">
+                                                                            <Border Background="#172438" BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="9,5">
+                                                                                <Grid Classes="member-row" ColumnDefinitions="28,1.4*,*,*,1.4*,157" ColumnSpacing="8" MinHeight="30" TextElement.FontSize="12">
+                                                                                    <TextBlock Text="{Binding Index}" Classes="muted" />
+                                                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                                    <TextBlock Grid.Column="2" Text="{Binding Type}" />
+                                                                                    <TextBlock Grid.Column="3" Text="{Binding Access}" />
+                                                                                    <StackPanel Grid.Column="4" VerticalAlignment="Center" Spacing="2">
+                                                                                        <Button Classes="value-summary" Click="BrowseAttributeClick"
+                                                                                                IsVisible="{Binding HasValueBrowser}"
+                                                                                                ToolTip.Tip="Открыть значение">
+                                                                                            <TextBlock Text="{Binding ValueSummary, StringFormat='{}{0} ↗'}"
+                                                                                                       MaxLines="1" TextTrimming="CharacterEllipsis" />
+                                                                                        </Button>
+                                                                                        <Button Classes="value-summary" Click="BrowseAttributeClick"
+                                                                                                IsVisible="{Binding HasScalarDetails}" ToolTip.Tip="Открыть значение">
+                                                                                            <TextBlock Text="{Binding ValueSummary}" MaxLines="1"
+                                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                                        </Button>
+                                                                                        <SelectableTextBlock IsVisible="{Binding HasInlineInteger}" TextWrapping="Wrap">
+                                                                                            <Run Text="{Binding ValueSummary}" />
+                                                                                            <Run Text="{Binding InlineIntegerHex}" Foreground="#ACBED3" />
+                                                                                        </SelectableTextBlock>
+                                                                                        <TextBlock Text="{Binding ValueSummary}" IsVisible="{Binding HasPlainSummary}"
+                                                                                                   ToolTip.Tip="{Binding ValueSummary}" MaxLines="1"
+                                                                                                   TextTrimming="CharacterEllipsis" />
+                                                                                        <TextBlock Text="К записи" IsVisible="{Binding HasPendingValue}" Foreground="#69C4E1" />
+                                                                                    </StackPanel>
+                                                                                    <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="5" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                                                        <Button Classes="secondary member-action" Content="Изменить" Click="EditAttributeClick"
+                                                                                                IsEnabled="{Binding IsWriteEnabled}" ToolTip.Tip="{Binding WriteUnavailableReason}"
+                                                                                                ToolTip.ShowOnDisabled="True" />
+                                                                                        <Button Classes="secondary member-action" Content="Считать" Click="ReadAttributeClick"
+                                                                                                IsEnabled="{Binding IsReadEnabled}" />
+                                                                                    </StackPanel>
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <TextBlock Text="Методы" Classes="section-title" Margin="0,8,0,0" />
+                                                        <Border BorderBrush="#31435B" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                                                            <StackPanel>
+                                                                <Border Background="#214A61">
+                                                                    <Grid ColumnDefinitions="28,2*,*,*,100" ColumnSpacing="8" Margin="9,7">
+                                                                        <TextBlock Text="№" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="1" Text="Имя" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="2" Text="Тип параметра" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="3" Text="Доступ" Classes="field-label" />
+                                                                        <TextBlock Grid.Column="4" Text="Действия" Classes="field-label" HorizontalAlignment="Right" />
+                                                                    </Grid>
+                                                                </Border>
+                                                                <ItemsControl ItemsSource="{Binding Methods}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate x:DataType="vm:MethodViewModel">
+                                                                            <Border Background="#172438" BorderBrush="#31435B" BorderThickness="0,1,0,0" Padding="9,5">
+                                                                                <Grid Classes="member-row" RowDefinitions="Auto,Auto" ColumnDefinitions="28,2*,*,*,100" ColumnSpacing="8" MinHeight="30" TextElement.FontSize="12">
+                                                                                    <TextBlock Text="{Binding Index}" Classes="muted" />
+                                                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                                    <TextBlock Grid.Column="2" Text="{Binding ParameterType}" />
+                                                                                    <TextBlock Grid.Column="3" Text="{Binding Access}" />
+                                                                                    <Button Grid.Column="4" Classes="secondary member-action" Content="Вызвать"
+                                                                                            Click="OpenMethodClick" IsEnabled="{Binding IsInvokeEnabled}"
+                                                                                            ToolTip.Tip="{Binding InvokeUnavailableReason}" ToolTip.ShowOnDisabled="True"
+                                                                                            HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                                                                    <SelectableTextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4"
+                                                                                                         Text="{Binding InvokeStatus}" TextWrapping="Wrap" Foreground="#69C4E1"
+                                                                                                         IsVisible="{Binding InvokeStatus, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
                     </Grid>
                 </Border>
             </Grid>
@@ -773,5 +684,11 @@
             </Grid>
         </Border>
 
+    </Grid>
+        <Border x:Name="DialogOverlay" IsVisible="False" Background="#B8000710"
+                Padding="16" KeyDown="DialogKeyDown" KeyboardNavigation.TabNavigation="Cycle">
+            <ContentControl x:Name="ObjectDialog" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        </Border>
     </Grid>
 </UserControl>

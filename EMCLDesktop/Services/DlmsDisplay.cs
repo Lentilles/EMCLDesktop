@@ -60,11 +60,11 @@ internal static class DlmsDisplay
         return output.ToString();
     }
 
-    internal static string Collection(DlmsType type, ImmutableArray<DlmsValue> items)
+    internal static string Collection(DlmsType type, ImmutableArray<DlmsValue> items, bool full = false)
     {
         var output = new StringBuilder();
         int shown = 1;
-        AppendCollection(output, type, items, 0, ref shown);
+        AppendCollection(output, type, items, 0, ref shown, full);
         return output.ToString();
     }
 
@@ -77,12 +77,14 @@ internal static class DlmsDisplay
 
     internal static string CollectionTitle(DlmsType type, int count) => $"{type} ({count} {ElementWord(count)})";
 
-    internal static bool IsNumeric(DlmsType? type) => type is
+    internal static bool IsInteger(DlmsType? type) => type is
         DlmsType.Int8 or DlmsType.Int16 or DlmsType.Int32 or DlmsType.Int64 or
         DlmsType.UInt8 or DlmsType.UInt16 or DlmsType.UInt32 or DlmsType.UInt64 or
         DlmsType.DeltaInt8 or DlmsType.DeltaInt16 or DlmsType.DeltaInt32 or
-        DlmsType.DeltaUInt8 or DlmsType.DeltaUInt16 or DlmsType.DeltaUInt32 or
-        DlmsType.Float32 or DlmsType.Float64 or DlmsType.Bcd or DlmsType.Enum;
+        DlmsType.DeltaUInt8 or DlmsType.DeltaUInt16 or DlmsType.DeltaUInt32;
+
+    internal static bool IsNumeric(DlmsType? type) => IsInteger(type) ||
+        type is DlmsType.Float32 or DlmsType.Float64 or DlmsType.Bcd or DlmsType.Enum;
 
     // Skip the A-XDR tag and keep the payload's width, byte order and bit pattern.
     internal static string NumericHex(DlmsValue value) =>
@@ -112,12 +114,13 @@ internal static class DlmsDisplay
     private const int MaxDisplayedValues = 5000;
 
     private static void AppendValue(StringBuilder output, DlmsValue value, int depth,
-        int? index, ref int shown)
+        int? index, ref int shown, bool full = false)
     {
         if (output.Length > 0) output.AppendLine();
         output.Append(' ', depth * 2);
         if (index is not null) output.Append('[').Append(index.Value).Append("] ");
-        if (++shown > MaxDisplayedValues)
+        shown++;
+        if (!full && shown > MaxDisplayedValues)
         {
             output.Append("… показано первых ").Append(MaxDisplayedValues).Append(" значений");
             return;
@@ -126,7 +129,7 @@ internal static class DlmsDisplay
         var items = CollectionItems(value);
         if (!items.IsDefault)
         {
-            AppendCollection(output, value.Type, items, depth, ref shown);
+            AppendCollection(output, value.Type, items, depth, ref shown, full);
             return;
         }
 
@@ -138,7 +141,7 @@ internal static class DlmsDisplay
                 .Append(' ', depth * 2).Append(NumericHex(value));
         else if (value.Value is ImmutableArray<byte> bytes)
         {
-            var displayed = bytes.Take(64).ToArray();
+            var displayed = full ? bytes.AsSpan() : bytes.AsSpan()[..Math.Min(bytes.Length, 64)];
             output.Append(Convert.ToHexString(displayed));
             if (bytes.Length > displayed.Length)
                 output.Append("… (").Append(bytes.Length).Append(" байт)");
@@ -148,18 +151,18 @@ internal static class DlmsDisplay
     }
 
     private static void AppendCollection(StringBuilder output, DlmsType type, ImmutableArray<DlmsValue> items,
-        int depth, ref int shown)
+        int depth, ref int shown, bool full)
     {
         const int maxDepth = 64;
         output.Append(CollectionTitle(type, items.Length));
-        if (depth >= maxDepth)
+        if (!full && depth >= maxDepth)
         {
             output.Append(" · достигнута максимальная глубина отображения");
             return;
         }
         int itemIndex = 0;
-        for (; itemIndex < items.Length && shown < MaxDisplayedValues; itemIndex++)
-            AppendValue(output, items[itemIndex], depth + 1, itemIndex, ref shown);
+        for (; itemIndex < items.Length && (full || shown < MaxDisplayedValues); itemIndex++)
+            AppendValue(output, items[itemIndex], depth + 1, itemIndex, ref shown, full);
         if (itemIndex < items.Length)
             output.AppendLine().Append(' ', (depth + 1) * 2)
                 .Append("… достигнут предел отображения ").Append(MaxDisplayedValues).Append(" значений");

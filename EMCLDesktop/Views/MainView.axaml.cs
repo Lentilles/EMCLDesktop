@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using EMCLDesktop.Services;
@@ -160,37 +161,72 @@ public partial class MainView : UserControl
             await viewModel.ReadAttributeAsync(attribute);
     }
 
-    private void ToggleWriteEditorClick(object? sender, RoutedEventArgs e)
+    private Control? dialogTrigger;
+
+    private void BrowseAttributeClick(object? sender, RoutedEventArgs e) => OpenAttributeDialog(sender, edit: false);
+
+    private void EditAttributeClick(object? sender, RoutedEventArgs e) => OpenAttributeDialog(sender, edit: true);
+
+    private void OpenAttributeDialog(object? sender, bool edit)
     {
-        if (sender is Control { DataContext: AttributeViewModel attribute })
-            attribute.ToggleWriteEditor();
+        if (sender is not Control { DataContext: AttributeViewModel attribute } source ||
+            DataContext is not MainViewModel { SelectedObject: { } obj } viewModel)
+            return;
+
+        var dialog = new AttributeDialog { DataContext = new AttributeDialogViewModel(viewModel, obj, attribute, edit) };
+        dialog.CloseRequested += (_, _) => CloseObjectDialog();
+        ShowObjectDialog(dialog, source, 680);
+        dialog.FocusAction();
     }
 
-    private void WriteOctetFormatRequested(object? sender, OctetFormatRequestedEventArgs e)
+    private void OpenMethodClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Control { DataContext: AttributeViewModel attribute }) return;
-        e.Handled = true;
-        attribute.TryChangeWriteOctetFormat(e.Format);
-    }
+        if (sender is not Control { DataContext: MethodViewModel method } source ||
+            DataContext is not MainViewModel viewModel) return;
 
-    private async void WriteAttributeClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: AttributeViewModel attribute } &&
-            DataContext is MainViewModel viewModel)
-            await viewModel.WriteAttributeAsync(attribute);
-    }
-
-    private void UseReadValueClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: AttributeViewModel attribute })
-            attribute.UseReadValue();
-    }
-
-    private async void InvokeMethodClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: MethodViewModel method } &&
-            DataContext is MainViewModel viewModel)
+        var dialog = new MethodDialog { DataContext = method };
+        dialog.CloseRequested += (_, _) => CloseObjectDialog();
+        dialog.InvokeRequested += async (_, _) =>
+        {
+            CloseObjectDialog();
             await viewModel.InvokeMethodAsync(method);
+        };
+        ShowObjectDialog(dialog, source, 420);
+        dialog.FocusAction();
+    }
+
+    private void ShowObjectDialog(Control dialog, Control source, double width)
+    {
+        dialogTrigger = source;
+        ObjectDialog.Width = Math.Min(width, Math.Max(0, Bounds.Width - 32));
+        ObjectDialog.MaxHeight = Math.Max(0, Bounds.Height - 32);
+        ObjectDialog.Content = dialog;
+        Workspace.IsEnabled = false;
+        DialogOverlay.IsVisible = true;
+    }
+
+    protected override void OnSizeChanged(SizeChangedEventArgs e)
+    {
+        base.OnSizeChanged(e);
+        if (!DialogOverlay.IsVisible || ObjectDialog.Content is not Control dialog) return;
+        ObjectDialog.Width = Math.Min(dialog is AttributeDialog ? 680 : 420, Math.Max(0, e.NewSize.Width - 32));
+        ObjectDialog.MaxHeight = Math.Max(0, e.NewSize.Height - 32);
+    }
+
+    private void DialogKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        CloseObjectDialog();
+        e.Handled = true;
+    }
+
+    private void CloseObjectDialog()
+    {
+        DialogOverlay.IsVisible = false;
+        ObjectDialog.Content = null;
+        Workspace.IsEnabled = true;
+        dialogTrigger?.Focus();
+        dialogTrigger = null;
     }
 
     private async void ReadProfileClick(object? sender, RoutedEventArgs e)
