@@ -40,17 +40,26 @@ internal static class SavedConfiguration
             var logicalName = LogicalName.Parse(saved.Obis);
             if (!seen.Add(logicalName))
                 throw new FormatException($"Повторяющийся OBIS в каталоге: {saved.Obis}.");
+            var definition = saved.ClassName is null or MeterObjectViewModel.UnknownClassName
+                ? CatalogDefinitions.Find(saved.ClassId, saved.ClassVersion)
+                : null;
             var obj = new MeterObjectViewModel(logicalName, saved.ClassId,
-                saved.ClassVersion, saved.ClassName);
+                saved.ClassVersion, definition?.Name ?? saved.ClassName);
             foreach (var item in saved.Attributes)
             {
                 if (item is null)
                     throw new FormatException($"У {saved.Obis} есть пустое описание атрибута.");
-                var attribute = new AttributeViewModel(item.Index, item.Name,
-                    item.HasDeclaredType ? item.Type : null, item.Access ?? "Не указан", item.CanRead)
+                var member = definition?.Attributes.FirstOrDefault(attribute => attribute.Index == item.Index);
+                string? name = item.Name is null or AttributeViewModel.UnknownName ? member?.Name ?? item.Name : item.Name;
+                string? declaredType = item.HasDeclaredType ? item.Type : null;
+                if (item.Type is null or AttributeViewModel.UnspecifiedType)
+                    declaredType = member?.Type?.ToString() ?? declaredType;
+                string? displayedType = declaredType ?? item.Type;
+                var attribute = new AttributeViewModel(item.Index, name,
+                    declaredType, item.Access ?? "Не указан", item.CanRead)
                 {
-                    Type = item.Type ?? "Тип не указан",
-                    WriteType = DlmsTypeText.Parse(item.Type),
+                    Type = displayedType ?? AttributeViewModel.UnspecifiedType,
+                    WriteType = DlmsTypeText.Parse(displayedType),
                     Value = item.Value ?? "Не считано"
                 };
                 obj.Attributes.Add(attribute);
@@ -59,8 +68,12 @@ internal static class SavedConfiguration
             {
                 if (item is null)
                     throw new FormatException($"У {saved.Obis} есть пустое описание метода.");
-                obj.Methods.Add(new MethodViewModel(item.Index, item.Name,
-                    item.ParameterType, item.Access ?? "Не указан"));
+                var member = definition?.Methods.FirstOrDefault(method => method.Index == item.Index);
+                string? name = item.Name is null or MethodViewModel.UnknownName ? member?.Name ?? item.Name : item.Name;
+                string? parameterType = item.ParameterType is null or MethodViewModel.UnspecifiedParameterType
+                    ? member?.ParameterType?.ToString() ?? item.ParameterType
+                    : item.ParameterType;
+                obj.Methods.Add(new MethodViewModel(item.Index, name, parameterType, item.Access ?? "Не указан"));
             }
             objects.Add(obj);
         }

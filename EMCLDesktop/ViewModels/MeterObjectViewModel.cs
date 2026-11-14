@@ -11,6 +11,8 @@ namespace EMCLDesktop.ViewModels;
 public sealed partial class MeterObjectViewModel(LogicalName logicalName, ushort classId, byte classVersion,
     string? className) : ObservableObject
 {
+    internal const string UnknownClassName = "Неизвестный класс";
+
     private static readonly IReadOnlyList<ProfileReadModeOption> readModes =
     [
         new(ProfileReadMode.All, "Весь буфер"),
@@ -24,7 +26,7 @@ public sealed partial class MeterObjectViewModel(LogicalName logicalName, ushort
     public string Obis => LogicalName.ToString();
     public ushort ClassId { get; } = classId;
     public byte ClassVersion { get; } = classVersion;
-    public string ClassName { get; } = className ?? "Неизвестный класс";
+    public string ClassName { get; } = className ?? UnknownClassName;
     public string Title => $"{Obis}  ·  {ClassName}";
     public bool IsProfileGeneric => ClassId == CosemClassIds.ProfileGeneric;
     public IReadOnlyList<ProfileReadModeOption> ProfileReadModes => readModes;
@@ -78,13 +80,16 @@ public sealed record ProfileCaptureColumnViewModel(CaptureObject Capture, string
 public sealed partial class AttributeViewModel(sbyte index, string? name, string? type,
     string access, bool canRead) : DlmsValuePreviewViewModel
 {
+    internal const string UnknownName = "Неизвестный атрибут";
+    internal const string UnspecifiedType = "Тип не указан";
+
     private bool hasOpenedWriteEditor;
     private IReadOnlyList<OctetStringPreview>? writeOctetPreviews;
 
     public sbyte Index { get; } = index;
-    public string Name { get; } = name ?? "Неизвестный атрибут";
+    public string Name { get; } = name ?? UnknownName;
     public bool HasDeclaredType { get; } = type is not null;
-    [ObservableProperty] public partial string Type { get; set; } = type ?? "Тип не указан";
+    [ObservableProperty] public partial string Type { get; set; } = type ?? UnspecifiedType;
     public string Access { get; } = access;
     public bool CanRead { get; } = canRead;
     [ObservableProperty] public partial bool IsReadEnabled { get; set; } = true;
@@ -250,11 +255,14 @@ public sealed class ObjectGroupViewModel(string className, ushort classId, byte 
 
 public sealed partial class MethodViewModel : ObservableObject
 {
+    internal const string UnknownName = "Неизвестный метод";
+    internal const string UnspecifiedParameterType = "Тип параметра не указан";
+
     public MethodViewModel(sbyte index, string? name, string? parameterType, string access)
     {
         Index = index;
-        Name = name ?? "Неизвестный метод";
-        ParameterType = parameterType ?? "Тип параметра не указан";
+        Name = name ?? UnknownName;
+        ParameterType = parameterType ?? UnspecifiedParameterType;
         Access = access;
         if (Enum.TryParse<DlmsType>(parameterType, out var type) && Enum.IsDefined(type))
         {

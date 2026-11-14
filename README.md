@@ -21,7 +21,7 @@ On macOS, the **EMCL Desktop** application menu includes About and Connection se
 
 ## Running from source
 
-.NET SDK 10 is required. The application uses the EMCL 0.3.1 NuGet package, pinned in `Directory.Packages.props`.
+.NET SDK 10 is required. The application uses the EMCL 0.4.0 NuGet package, pinned in `Directory.Packages.props`.
 
 Run these commands from the `EMCLDesktop` repository root:
 

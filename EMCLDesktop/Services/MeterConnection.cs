@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Text;
 using EMCL.Client.Association;
 using EMCL.Client.Sessions;
-using EMCL.Composition;
 using EMCL.Core.Access;
 using EMCL.Core.Codecs;
 using EMCL.Core.Objects;
@@ -433,7 +432,7 @@ public sealed class MeterConnection : IAsyncDisposable
         DlmsClientSession session, MeterConnectionOptions options, LogicalName associationName,
         IProgress<ObjectListProgress>? progress, CancellationToken cancellationToken)
     {
-        var importer = new EmclBuilder { Limits = options.Limits }.CreateImporter();
+        var importer = CatalogDefinitions.CreateImporter(options.Limits);
         await using var stream = await session.OpenObjectListAsync(importer,
             options.AssociationVersion, associationName, cancellationToken).ConfigureAwait(false);
         var entries = new List<DlmsValue>(stream.TotalCount);
