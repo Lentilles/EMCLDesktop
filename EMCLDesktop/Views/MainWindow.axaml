@@ -10,5 +10,16 @@
         Title="EMCL Desktop — счётчик DLMS/COSEM"
         Background="{StaticResource WorkspaceContentBackground}"
         Width="1320" Height="840" MinWidth="1000" MinHeight="680">
-    <views:MainView />
+    <Grid RowDefinitions="Auto,*">
+        <Border x:Name="UpdateNotice" IsVisible="False" Background="#183C50"
+                Padding="16,10" BorderBrush="#39738B" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                <TextBlock Text="Новая версия загружена. Закройте и снова откройте приложение, чтобы установить обновление."
+                           Foreground="#F4F7FC" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Понятно" Click="DismissUpdateNoticeClick"
+                        VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+        <views:MainView x:Name="MainContent" Grid.Row="1" />
+    </Grid>
 </Window>

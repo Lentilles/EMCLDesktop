@@ -77,7 +77,7 @@ jobs:
             fi
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+            version="0.0.1-ci.${GITHUB_RUN_NUMBER}"
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
@@ -95,20 +95,34 @@ jobs:
             -p:DebugType=None -p:DebugSymbols=false \
             -o artifacts/publish
 
-      - name: Package release
+      - name: Install Velopack CLI
+        run: dotnet tool install vpk --tool-path "$RUNNER_TEMP/vpk" --version 1.2.0
+
+      - name: Package Velopack release
         env:
           APP_VERSION: ${{ steps.version.outputs.value }}
           APP_RID: ${{ matrix.rid }}
         run: |
-          python .github/scripts/package-release.py \
-            --rid "$APP_RID" --version "$APP_VERSION" \
-            --publish artifacts/publish --output artifacts/release --emcl ../EMCL
+          cp README.md LICENSE artifacts/publish/
+          mkdir -p artifacts/publish/licenses
+          cp ../EMCL/LICENSE artifacts/publish/licenses/EMCL-LICENSE
+          exe=EMCLDesktop.Desktop
+          icon=EMCLDesktop/Assets/emcl-desktop.png
+          case "$APP_RID" in
+            win-*) exe="$exe.exe"; icon=EMCLDesktop/Assets/emcl-desktop.ico ;;
+            osx-*) icon=EMCLDesktop/Assets/emcl-desktop.icns ;;
+          esac
+          "$RUNNER_TEMP/vpk/vpk" pack \
+            --packId "EMCLDesktop-$APP_RID" --packVersion "$APP_VERSION" \
+            --packDir artifacts/publish --mainExe "$exe" --runtime "$APP_RID" \
+            --channel "$APP_RID" --packTitle "EMCL Desktop" --icon "$icon" \
+            --delta none --outputDir artifacts/velopack
 
-      - name: Upload release package
+      - name: Upload Velopack packages
         uses: actions/upload-artifact@v7
         with:
-          name: package-${{ matrix.rid }}
-          path: EMCLDesktop/artifacts/release/*
+          name: velopack-${{ matrix.rid }}
+          path: EMCLDesktop/artifacts/velopack/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -128,32 +142,22 @@ jobs:
           path: source
           persist-credentials: false
 
-      - name: Download all six packages
+      - name: Download Velopack packages
         uses: actions/download-artifact@v8
         with:
-          pattern: package-*
-          path: release
-          merge-multiple: true
+          pattern: velopack-*
+          path: velopack
+
+      - name: Validate and collect Velopack packages
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python source/.github/scripts/collect-velopack.py velopack release "${RELEASE_TAG#v}"
 
       - name: Verify packages and calculate checksums
         working-directory: release
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          version="${RELEASE_TAG#v}"
-          files=(
-            "EMCLDesktop-${version}-win-x64.zip"
-            "EMCLDesktop-${version}-win-arm64.zip"
-            "EMCLDesktop-${version}-linux-x64.tar.gz"
-            "EMCLDesktop-${version}-linux-arm64.tar.gz"
-            "EMCLDesktop-${version}-osx-x64.dmg"
-            "EMCLDesktop-${version}-osx-arm64.dmg"
-          )
-          for file in "${files[@]}"; do
-            test -s "$file"
-          done
-          sha256sum "${files[@]}" > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 
       - name: Publish complete release
         env:

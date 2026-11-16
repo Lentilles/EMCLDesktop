@@ -1,5 +1,20 @@
 # EMCL Desktop
 
+## Installation
+
+Download the installer for your computer from the [latest GitHub Release](https://github.com/Lentilles/EMCLDesktop/releases/latest). Choose `x64` for Intel or AMD 64-bit processors, or `arm64` for ARM64 processors such as Apple Silicon and Windows on ARM.
+
+- **Windows:** download and run `EMCLDesktop-win-<arch>-win-<arch>-Setup.exe`.
+- **macOS:** download and open `EMCLDesktop-osx-<arch>-osx-<arch>-Setup.pkg`, then follow the installer. The package is not signed with a Developer ID or notarized; macOS may block it. See the [macOS distribution notes](#macos-distribution).
+- **Linux:** download `EMCLDesktop-linux-<arch>-linux-<arch>.AppImage` into a folder you can write to. Make it executable and run it, replacing the filename below with the downloaded file:
+
+  ```sh
+  chmod +x EMCLDesktop-linux-x64-linux-x64.AppImage
+  ./EMCLDesktop-linux-x64-linux-x64.AppImage
+  ```
+
+Updates download automatically. When notified, close the application and open it again to use the new version.
+
 A desktop application for working with DLMS/COSEM meters, built with Avalonia UI and the EMCL library. Read meter objects and profiles, browse a saved object catalog offline, inspect packets, and export communication traces.
 
 The desktop project targets Windows, Linux, and macOS. Android, iOS, and Browser projects are included in the solution as part of the original template; the instructions below apply to `EMCLDesktop.Desktop`.
@@ -51,17 +66,25 @@ For another platform, replace the runtime identifier after `-r` and the output d
 | Linux, x64 | `linux-x64` |
 | Linux, ARM64 | `linux-arm64` |
 
-The command creates a publish directory containing the executable and its dependencies. Distribute the entire directory, or use a ready-made package from GitHub Releases. Self-contained builds include .NET, but system graphics libraries and serial adapter drivers must be installed separately if needed.
+The command creates a publish directory containing the executable and its dependencies. Ready-made Velopack installers are available from GitHub Releases. Self-contained builds include .NET, but system graphics libraries and serial adapter drivers must be installed separately if needed.
 
 ### CI/CD and GitHub Releases
+
+#### Automatic updates
+
+Velopack builds check the latest stable GitHub Release after the window opens and download updates in the background. A notification appears when an update is ready. The update is installed when the application closes, after the meter connection has been released; the new version starts the next time the application is opened. Network or download errors do not prevent normal use, and the check is retried on the next launch.
+
+Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-<rid>` setup on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
+
+Each architecture has its own update channel. Releases contain complete update packages; prereleases and delta packages are not used. macOS Velopack builds are not signed with a Developer ID or notarized and may be blocked by Gatekeeper; see the macOS distribution notes below. When multiple application instances are open, installation is deferred rather than deliberately closing the other instances.
 
 The [Build and release](.github/workflows/release.yml) workflow runs on pushes, pull requests, and manual dispatches through Actions. For each of the six targets, it runs console checks, publishes a self-contained Release build, and packages it on a runner with the matching architecture. Regular builds are available as Actions artifacts for 14 days.
 
 | Platform | Release package |
 | --- | --- |
-| Windows x64 / ARM64 | `EMCLDesktop-<version>-win-x64.zip` / `win-arm64.zip` |
-| Linux x64 / ARM64 | `EMCLDesktop-<version>-linux-x64.tar.gz` / `linux-arm64.tar.gz` |
-| macOS Intel / Apple Silicon | `EMCLDesktop-<version>-osx-x64.dmg` / `osx-arm64.dmg` |
+| Windows x64 / ARM64 | `EMCLDesktop-win-<arch>-win-<arch>-Setup.exe` |
+| Linux x64 / ARM64 | `EMCLDesktop-linux-<arch>-linux-<arch>.AppImage` |
+| macOS Intel / Apple Silicon | `EMCLDesktop-osx-<arch>-osx-<arch>-Setup.pkg` |
 
 To publish a release, commit your changes and push a version tag to GitHub:
 
@@ -74,19 +97,11 @@ Once all six builds succeed, the workflow creates a GitHub Release with the pack
 
 [Release notes by version](.github/release-notes) are also available in the repository. To apply historical notes to an existing GitHub Release, edit its description on GitHub or run `gh release edit <tag> --notes-file .github/release-notes/<tag>.md`.
 
-Each package includes the README, the application's MIT license, the EMCL license, and a `build-info.json` file containing the version, architecture, and commit IDs of both repositories. On macOS, these files are located in `EMCL Desktop.app/Contents/Resources`.
+Each Velopack package includes the README, the application's MIT license, and the EMCL license. The release also includes full update packages, channel indexes, and checksums for all published files.
 
 CI checks out the library from `Lentilles/EMCL` into a sibling directory. Its commit is pinned in the workflow's `EMCL_REF`; update that SHA when upgrading the dependency. No additional secrets are needed if EMCL is public. If EMCL is private, add an `EMCL_READ_TOKEN` secret under **Settings → Secrets and variables → Actions**, with permission to read the EMCL repository contents. The application's default `GITHUB_TOKEN` does not grant access to another private repository, and pull requests from forks do not receive this secret either.
 
 Publishing uses the built-in `GITHUB_TOKEN`, with `contents: write` permission granted only to the release job. No separate token is needed for GitHub Releases. GitHub Actions and the referenced `actions/*` must be allowed in the repository settings.
-
-After running `dotnet publish`, you can package a build locally using Python 3.9+:
-
-```sh
-python3 .github/scripts/package-release.py --rid osx-arm64 --version 1.2.3 --publish artifacts/osx-arm64 --output artifacts/release --emcl ../EMCL
-```
-
-DMG packaging must run on macOS. The script creates an `.app` bundle, applies and verifies a local ad-hoc signature, then creates and verifies a compressed DMG. The DMG contains the application and an `Applications` shortcut for drag-and-drop installation. Paid Developer ID signing and notarization are not configured; an ad-hoc signature does not replace them.
 
 ### macOS distribution
 
