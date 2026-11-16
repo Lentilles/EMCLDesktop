@@ -104,6 +104,38 @@ jobs:
             --rid "$APP_RID" --version "$APP_VERSION" \
             --publish artifacts/publish --output artifacts/release --emcl ../EMCL
 
+      - name: Install Velopack CLI
+        run: dotnet tool install vpk --tool-path "$RUNNER_TEMP/vpk" --version 1.2.0
+
+      - name: Package Velopack release
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+          APP_RID: ${{ matrix.rid }}
+        run: |
+          cp README.md LICENSE artifacts/publish/
+          mkdir -p artifacts/publish/licenses
+          cp ../EMCL/LICENSE artifacts/publish/licenses/EMCL-LICENSE
+          exe=EMCLDesktop.Desktop
+          icon=EMCLDesktop/Assets/emcl-desktop.png
+          case "$APP_RID" in
+            win-*) exe="$exe.exe"; icon=EMCLDesktop/Assets/emcl-desktop.ico ;;
+            osx-*) icon=EMCLDesktop/Assets/emcl-desktop.icns ;;
+          esac
+          "$RUNNER_TEMP/vpk/vpk" pack \
+            --packId "EMCLDesktop-$APP_RID" --packVersion "$APP_VERSION" \
+            --packDir artifacts/publish --mainExe "$exe" --runtime "$APP_RID" \
+            --channel "$APP_RID" --packTitle "EMCL Desktop" --icon "$icon" \
+            --delta none --outputDir artifacts/velopack
+
+      - name: Upload Velopack packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: velopack-${{ matrix.rid }}
+          path: EMCLDesktop/artifacts/velopack/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
       - name: Upload release package
         uses: actions/upload-artifact@v7
         with:
@@ -134,6 +166,17 @@ jobs:
           pattern: package-*
           path: release
           merge-multiple: true
+
+      - name: Download Velopack packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: velopack-*
+          path: velopack
+
+      - name: Validate and collect Velopack packages
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python source/.github/scripts/collect-velopack.py velopack release "${RELEASE_TAG#v}"
 
       - name: Verify packages and calculate checksums
         working-directory: release

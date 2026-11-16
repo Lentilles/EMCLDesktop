@@ -18,6 +18,7 @@
         </Grid>
         <TextBlock Text="Чтение счётчиков DLMS/COSEM, просмотр объектов и профилей, анализ пакетов и трассировка обмена."
                    Classes="muted" />
+        <TextBlock x:Name="UpdateStatusText" Classes="muted" TextWrapping="Wrap" />
         <StackPanel Spacing="4">
             <TextBlock Text="© 2026 Alexey Tyapkin" Classes="muted" FontSize="12" />
             <TextBlock Text="Лицензия MIT" Classes="muted" FontSize="12" />

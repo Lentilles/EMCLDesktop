@@ -55,6 +55,14 @@ The command creates a publish directory containing the executable and its depend
 
 ### CI/CD and GitHub Releases
 
+#### Automatic updates
+
+Velopack builds check the latest stable GitHub Release after the window opens and download updates in the background. A downloaded update is installed when the application closes, after the meter connection has been released; the new version starts the next time the application is opened. The About window shows the update status. Network or download errors do not prevent normal use, and the check is retried on the next launch.
+
+Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-<rid>` setup on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
+
+Each architecture has its own update channel. Releases contain complete update packages; prereleases and delta packages are not used. macOS Velopack builds are not signed with a Developer ID or notarized and may be blocked by Gatekeeper; see the macOS distribution notes below. When multiple application instances are open, installation is deferred rather than deliberately closing the other instances.
+
 The [Build and release](.github/workflows/release.yml) workflow runs on pushes, pull requests, and manual dispatches through Actions. For each of the six targets, it runs console checks, publishes a self-contained Release build, and packages it on a runner with the matching architecture. Regular builds are available as Actions artifacts for 14 days.
 
 | Platform | Release package |

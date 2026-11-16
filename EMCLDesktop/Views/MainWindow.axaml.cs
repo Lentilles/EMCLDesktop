@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using EMCLDesktop.ViewModels;
+using EMCLDesktop.Services;
 
 namespace EMCLDesktop.Views;
 
@@ -27,9 +28,11 @@ public partial class MainWindow : Window
 
     private async System.Threading.Tasks.Task CloseAfterCleanupAsync(MainViewModel viewModel)
     {
+        var cleanedUp = false;
         try
         {
             await viewModel.DisposeAsync();
+            cleanedUp = true;
         }
         catch (System.Exception)
         {
@@ -37,6 +40,8 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (cleanedUp)
+                await DesktopUpdates.Current.PrepareForExitAsync();
             closingAfterCleanup = true;
             Close();
         }

@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using EMCLDesktop.ViewModels;
 using EMCLDesktop.Views;
+using EMCLDesktop.Services;
 
 namespace EMCLDesktop;
 
@@ -26,6 +27,7 @@ public partial class App : Application
             {
                 DataContext = new MainViewModel()
             };
+            desktop.MainWindow.Opened += (_, _) => DesktopUpdates.Current.Start();
         }
         else if (ApplicationLifetime is IActivityApplicationLifetime singleViewFactoryApplicationLifetime)
         {
