@@ -1,29 +1,9 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:EMCLDesktop.Views"
         x:Class="EMCLDesktop.Views.AboutWindow"
         Title="О программе EMCL Desktop"
         Background="#0D1726" Width="480" SizeToContent="Height"
         CanResize="False" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
-    <Window.Styles>
-        <StyleInclude Source="/Styles/CommonStyles.axaml" />
-    </Window.Styles>
-    <StackPanel Margin="28" Spacing="20">
-        <Grid ColumnDefinitions="72,*" ColumnSpacing="12">
-            <Image Source="/Assets/emcl-desktop.png" Width="72" Height="72" />
-            <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
-                <TextBlock Text="EMCL Desktop" FontSize="28" FontWeight="SemiBold"
-                           Foreground="#F4F7FC" />
-                <TextBlock x:Name="VersionText" Foreground="#69C4E1" />
-            </StackPanel>
-        </Grid>
-        <TextBlock Text="Чтение счётчиков DLMS/COSEM, просмотр объектов и профилей, анализ пакетов и трассировка обмена."
-                   Classes="muted" />
-        <TextBlock x:Name="UpdateStatusText" Classes="muted" TextWrapping="Wrap" />
-        <StackPanel Spacing="4">
-            <TextBlock Text="© 2026 Alexey Tyapkin" Classes="muted" FontSize="12" />
-            <TextBlock Text="Лицензия MIT" Classes="muted" FontSize="12" />
-        </StackPanel>
-        <Button Content="Закрыть" Classes="primary" IsDefault="True" IsCancel="True"
-                HorizontalAlignment="Right" Click="CloseClick" />
-    </StackPanel>
+    <views:AboutContent x:Name="ContentView" />
 </Window>

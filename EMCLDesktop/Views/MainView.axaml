@@ -665,17 +665,24 @@
         </Grid>
         <Border Grid.Column="1" Grid.Row="1" Padding="16,6" Background="{StaticResource WorkspaceContentBackground}"
                 BorderBrush="{StaticResource WorkspaceDividerBrush}" BorderThickness="0,1,0,0">
-            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
                 <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="#ACBED3" FontSize="11" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Classes="secondary" Content="Копировать" IsVisible="{Binding HasStatusError}"
                         ToolTip.Tip="Копировать текст ошибки" Padding="8,3" FontSize="11" VerticalAlignment="Center" Click="CopyStatusClick" />
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="5" Margin="0,8,0,0"
+                <Button Grid.Column="2" Click="AboutClick" Width="12" Height="12" MinWidth="0" MinHeight="0"
+                        Padding="0" BorderThickness="0" Background="Transparent" Foreground="#ACBED3"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        ToolTip.Tip="О приложении" ToolTip.Placement="Top" AutomationProperties.Name="О приложении">
+                    <Path Width="12" Height="12" Stretch="Uniform" Stroke="{Binding $parent[Button].Foreground}"
+                          StrokeThickness="1.8" Data="M 12,2 A 10,10 0 1 1 12,22 A 10,10 0 1 1 12,2 M 12,10 V 17 M 12,6 V 7" />
+                </Button>
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="5" Margin="0,8,0,0"
                             IsVisible="{Binding IsTreeReadInProgress}">
                     <TextBlock Text="{Binding TreeReadProgressText}" Foreground="#69C4E1" FontSize="12" />
                     <ProgressBar Minimum="0" Maximum="{Binding TreeReadProgressMaximum}" Value="{Binding TreeReadCurrent}"
                                  IsIndeterminate="{Binding IsTreeReadIndeterminate}" Height="6" />
                 </StackPanel>
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="5" Margin="0,8,0,0"
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="5" Margin="0,8,0,0"
                             IsVisible="{Binding IsProfileReadInProgress}">
                     <TextBlock Text="{Binding ProfileReadProgressText}" Foreground="#69C4E1" FontSize="12" />
                     <ProgressBar Minimum="0" Maximum="{Binding ProfileReadProgressMaximum}"

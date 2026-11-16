@@ -155,7 +155,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(IsProfileReadInProgress), nameof(IsProfileReadIndeterminate),
         nameof(ProfileReadProgressMaximum), nameof(ProfileReadProgressCurrent), nameof(ProfileReadProgressText))]
     private partial ProfileBufferProgress? ProfileReadProgress { get; set; }
-    [ObservableProperty] public partial int SelectedTabIndex { get; set; }
+    [ObservableProperty] public partial int SelectedTabIndex { get; set; } = ConnectionSettingsTabIndex;
     [ObservableProperty] public partial string SearchText { get; set; } = "";
     [ObservableProperty] public partial bool UseRegularExpression { get; set; }
     [ObservableProperty] public partial string SearchError { get; set; } = "";
@@ -1134,7 +1134,6 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             operation.Token.ThrowIfCancellationRequested();
             ++selectionVersion;
             PopulateObjects(meter);
-            SelectedTabIndex = ObjectsTabIndex;
             Status = $"Дерево обновлено: {Objects.Count} объектов" +
                 (meter.SkippedDuplicateEntries > 0
                     ? $"; пропущено одинаковых записей: {meter.SkippedDuplicateEntries}" : "") + ".";

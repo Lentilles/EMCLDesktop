@@ -16,7 +16,41 @@ public sealed class PacketAnalyzer
 {
     public const int MaxMessageBytes = 1024 * 1024;
     public const int MaxPackets = 50_000;
-    private readonly List<InspectedPacket> packets = [];
+    private readonly Dictionary<long, InspectedPacket> packets = [];
+    private readonly Queue<long> packetOrder = [];
+    private readonly HashSet<long> changedPackets = [];
+    private int packetLimit;
+
+    public PacketAnalyzer(int packetLimit = MaxPackets) => SetPacketLimit(packetLimit);
+
+    public long TotalPackets => nextId;
+    public long FirstPacketId => packetOrder.TryPeek(out long id) ? id : nextId + 1;
+
+    public void SetPacketLimit(int limit)
+    {
+        if (limit < 1 || limit > MaxPackets) throw new ArgumentOutOfRangeException(nameof(limit));
+        packetLimit = limit;
+        TrimPackets();
+    }
+
+    public IReadOnlyList<InspectedPacket> TakeChanges()
+    {
+        var result = changedPackets.Order().Select(id => packets[id]).ToArray();
+        changedPackets.Clear();
+        return result;
+    }
+
+    private void TrimPackets()
+    {
+        while (packetOrder.Count > packetLimit)
+        {
+            long id = packetOrder.Dequeue();
+            packets.Remove(id);
+            changedPackets.Remove(id);
+            foreach (var stream in streams.Values)
+                if (stream.PendingId == id) stream.PendingId = 0;
+        }
+    }
     private readonly Dictionary<string, StreamBuffer> streams = [];
     private readonly Dictionary<string, PendingRequest> requests = [];
     private readonly Dictionary<string, SegmentTransfer> segments = [];
@@ -44,9 +78,14 @@ public sealed class PacketAnalyzer
         public int ByteCount;
     }
 
-    public static IReadOnlyList<InspectedPacket> AnalyzeText(string text, out int ignoredLines, CancellationToken cancellationToken = default)
+    public static IReadOnlyList<InspectedPacket> AnalyzeText(string text, out int ignoredLines,
+        CancellationToken cancellationToken = default, int packetLimit = MaxPackets) =>
+        AnalyzeText(text, out ignoredLines, out _, cancellationToken, packetLimit);
+
+    public static IReadOnlyList<InspectedPacket> AnalyzeText(string text, out int ignoredLines, out long totalPackets,
+        CancellationToken cancellationToken = default, int packetLimit = MaxPackets)
     {
-        var analyzer = new PacketAnalyzer();
+        var analyzer = new PacketAnalyzer(packetLimit);
         ignoredLines = 0;
         foreach (var (runs, isByteDump) in LogTextExtractor.ReadLines(text, cancellationToken))
         {
@@ -56,10 +95,11 @@ public sealed class PacketAnalyzer
             if (!found) ignoredLines++;
         }
         analyzer.Finish();
+        totalPackets = analyzer.TotalPackets;
         return analyzer.Snapshot();
     }
 
-    public IReadOnlyList<InspectedPacket> Snapshot() => packets.ToArray();
+    public IReadOnlyList<InspectedPacket> Snapshot() => packetOrder.Select(id => packets[id]).ToArray();
 
     public void Feed(InspectionInput input) => Feed(input, fromText: false, isByteDump: false);
 
@@ -600,7 +640,7 @@ public sealed class PacketAnalyzer
     {
         foreach (long id in ids)
         {
-            var packet = Get(id);
+            if (!packets.TryGetValue(id, out var packet)) continue;
             Put(packet with { RelatedPacketIds = packet.RelatedPacketIds.Append(assembledId).Distinct().ToArray(),
                 IsIncomplete = false, Diagnostic = $"{message} в № {assembledId}." });
         }
@@ -651,28 +691,32 @@ public sealed class PacketAnalyzer
         stream.PendingId = 0; stream.Bytes = []; stream.Sources.Clear();
     }
 
-    private long NewId()
-    {
-        if (nextId >= MaxPackets) throw new FormatException("Достигнут предел инспектора (50000 пакетов). Разделите лог на части.");
-        return ++nextId;
-    }
-    private InspectedPacket Get(long id) => packets[checked((int)id - 1)];
+    private long NewId() => ++nextId;
+
     private void Put(InspectedPacket packet)
     {
-        int index = checked((int)packet.Id - 1);
-        if (index == packets.Count) packets.Add(packet);
-        else if (index < packets.Count) packets[index] = packet;
-        else throw new InvalidOperationException("Нарушен порядок пакетов инспектора.");
+        if (packets.ContainsKey(packet.Id))
+            packets[packet.Id] = packet;
+        else if (packet.Id == nextId)
+        {
+            packets.Add(packet.Id, packet);
+            packetOrder.Enqueue(packet.Id);
+        }
+        else return; // An old packet can be referenced by an exchange after leaving the window.
+        changedPackets.Add(packet.Id);
+        TrimPackets();
     }
+
     private void Annotate(long id, string message, bool error = false, bool incomplete = false)
     {
-        var packet = Get(id);
+        if (!packets.TryGetValue(id, out var packet)) return;
         Put(packet with { Diagnostic = Join(packet.Diagnostic, message), HasError = packet.HasError || error,
             IsIncomplete = packet.IsIncomplete || incomplete });
     }
+
     private void Link(long id, long related)
     {
-        var packet = Get(id);
+        if (!packets.TryGetValue(id, out var packet)) return;
         Put(packet with { RelatedPacketIds = packet.RelatedPacketIds.Append(related).Distinct().ToArray() });
     }
     private static string Join(string first, string second) => string.IsNullOrEmpty(first) ? second : $"{first} {second}";

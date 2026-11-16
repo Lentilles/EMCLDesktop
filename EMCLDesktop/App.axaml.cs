@@ -51,6 +51,11 @@ public partial class App : Application
             { MainWindow: { IsVisible: true } owner })
             return;
 
+        await ShowAboutAsync(owner);
+    }
+
+    public async System.Threading.Tasks.Task ShowAboutAsync(Avalonia.Controls.Window owner)
+    {
         if (aboutWindow is not null)
         {
             aboutWindow.Activate();

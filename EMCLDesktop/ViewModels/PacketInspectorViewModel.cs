@@ -60,10 +60,12 @@ public sealed record RelatedPacketViewModel(long Id, string Title);
 public sealed partial class PacketInspectorViewModel : ObservableObject, IDisposable
 {
     private const int BytesPerPage = 256;
+    private const int CaptureBatchSize = 512;
     private readonly DiagnosticTrace trace;
-    private PacketAnalyzer liveAnalyzer = new();
-    private readonly ObservableCollection<PacketItemViewModel> livePackets = [];
-    private readonly ObservableCollection<PacketItemViewModel> textPackets = [];
+    private PacketAnalyzer liveAnalyzer = new(5_000);
+    private readonly Dictionary<long, PacketItemViewModel> livePacketIndex = [];
+    private readonly PacketCollection livePackets = [];
+    private readonly PacketCollection textPackets = [];
     private readonly DispatcherTimer timer;
     private readonly CancellationTokenSource shutdown = new();
     private readonly CancellationToken stopToken;
@@ -75,15 +77,17 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     private long lastCapture;
     private long liveClearedThroughCaptureId;
     private bool disposed, liveFaulted;
-    private string liveStatus = "Данные появятся при обмене с прибором.";
+    private string liveStatus = "";
     private string textStatus = "Вставьте лог с HEX-пакетами и нажмите «Разобрать».";
 
+    public IReadOnlyList<int> PacketLimitOptions { get; } = [500, 2_000, 5_000, 10_000, 50_000];
+    [ObservableProperty] public partial int PacketLimit { get; set; } = 5_000;
     [ObservableProperty] public partial int SourceIndex { get; set; }
     [ObservableProperty] public partial bool IsActive { get; set; }
     [ObservableProperty] public partial bool IsAnalyzing { get; set; }
     [ObservableProperty] public partial bool IsInputExpanded { get; set; } = true;
     [ObservableProperty] public partial string InputText { get; set; } = "";
-    [ObservableProperty] public partial string AnalysisStatus { get; set; } = "Данные появятся при обмене с прибором.";
+    [ObservableProperty] public partial string AnalysisStatus { get; set; } = "";
     [ObservableProperty] public partial ObservableCollection<PacketItemViewModel> Packets { get; set; }
     [ObservableProperty] public partial PacketItemViewModel? SelectedPacket { get; set; }
     [ObservableProperty] public partial InspectorFieldViewModel? SelectedField { get; set; }
@@ -152,6 +156,17 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         OnPropertyChanged(nameof(HasPackets));
         if (IsLive && IsActive) _ = RefreshLiveAsync();
     }
+    partial void OnPacketLimitChanged(int value)
+    {
+        Interlocked.Exchange(ref dirty, 1);
+        if (IsLive && IsActive) _ = RefreshLiveAsync();
+        if (IsText)
+        {
+            textStatus = "Лимит изменён. Нажмите «Разобрать», чтобы применить его к тексту.";
+            AnalysisStatus = textStatus;
+        }
+    }
+
     partial void OnInputTextChanged(string value)
     {
         textVersion++;
@@ -168,6 +183,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         using var analysis = CancellationTokenSource.CreateLinkedTokenSource(stopToken, cancellationToken);
         string input = InputText;
         int version = textVersion;
+        int packetLimit = PacketLimit;
         IsAnalyzing = true;
         textStatus = "Разбор лога…";
         if (IsText) AnalysisStatus = textStatus;
@@ -175,17 +191,18 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         {
             var result = await Task.Run(() =>
             {
-                var packets = PacketAnalyzer.AnalyzeText(input, out int ignored, analysis.Token);
-                return (Packets: packets, Ignored: ignored);
+                var packets = PacketAnalyzer.AnalyzeText(input, out int ignored, out long total, analysis.Token, packetLimit);
+                return (Packets: packets, Ignored: ignored, Total: total);
             }, analysis.Token);
             analysis.Token.ThrowIfCancellationRequested();
-            if (disposed || version != textVersion) return;
-            textPackets.Clear();
+            if (disposed || version != textVersion || packetLimit != PacketLimit) return;
             selections.Remove(1);
-            Reconcile(textPackets, result.Packets);
+            textPackets.ReplaceAll(result.Packets.Select(packet => new PacketItemViewModel(packet)));
             if (result.Packets.Count > 0) IsInputExpanded = false;
             textStatus = result.Packets.Count == 0 ? "HEX-пакеты не найдены. Поддерживаются HDLC, Wrapper и DLMS APDU."
-                : $"Пакетов: {result.Packets.Count}; ошибок: {result.Packets.Count(p => p.HasError)}; пропущено текстовых строк: {result.Ignored}.";
+                : $"Показано {result.Packets.Count} из {result.Total} пакетов" +
+                  (result.Total > result.Packets.Count ? $" · ранние скрыты: {result.Total - result.Packets.Count}" : "") +
+                  $"; ошибок в списке: {result.Packets.Count(p => p.HasError)}; пропущено текстовых строк: {result.Ignored}.";
             if (IsText)
             {
                 SelectedPacket = textPackets.FirstOrDefault();
@@ -215,29 +232,21 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             if (Interlocked.Exchange(ref dirty, 0) == 0) return;
             long clearedThroughCaptureId = trace.ClearedThroughCaptureId;
             int currentSession = trace.CurrentSessionId;
-            var captures = trace.CapturesAfter(lastCapture);
-            int session = Math.Max(currentSession, captures.LastOrDefault()?.SessionId ?? 0);
+            var captures = trace.CapturesAfter(lastCapture, CaptureBatchSize, currentSession);
+            int session = currentSession;
             bool reset = liveSession != session || liveClearedThroughCaptureId != clearedThroughCaptureId;
             if (reset)
             {
-                liveAnalyzer = new();
+                liveAnalyzer = new(PacketLimit);
                 liveSession = session;
                 liveClearedThroughCaptureId = clearedThroughCaptureId;
                 liveFaulted = false;
             }
             if (liveFaulted) return;
-            if (captures.Count == 0)
+            int packetLimit = PacketLimit;
+            var update = await Task.Run(() =>
             {
-                if (reset)
-                {
-                    livePackets.Clear(); selections.Remove(0); SelectedPacket = null;
-                    liveStatus = "Данные текущего подключения появятся при обмене с прибором.";
-                    AnalysisStatus = liveStatus; OnPropertyChanged(nameof(HasPackets));
-                }
-                return;
-            }
-            var snapshot = await Task.Run(() =>
-            {
+                liveAnalyzer.SetPacketLimit(packetLimit);
                 foreach (var capture in captures.Where(c => c.SessionId == session))
                 {
                     stopToken.ThrowIfCancellationRequested();
@@ -247,13 +256,15 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
                         $"{capture.Timestamp:yyyy-MM-dd HH:mm:ss.fff} {capture.Transport} {capture.Direction}: {Convert.ToHexString(capture.Bytes.Span)}",
                         capture.SessionId));
                 }
-                return liveAnalyzer.Snapshot();
+                return (FirstId: liveAnalyzer.FirstPacketId, Total: liveAnalyzer.TotalPackets,
+                    Changed: liveAnalyzer.TakeChanges());
             }, stopToken);
-            if (disposed || trace.ClearedThroughCaptureId != clearedThroughCaptureId) return;
-            lastCapture = captures[^1].Id;
-            if (reset) { livePackets.Clear(); selections.Remove(0); }
-            Reconcile(livePackets, snapshot);
-            liveStatus = $"Текущее подключение · пакетов: {snapshot.Count} · обновляется при обмене. Данные остаются после отключения.";
+            if (disposed || trace.ClearedThroughCaptureId != clearedThroughCaptureId || trace.CurrentSessionId != session) return;
+            if (captures.Count > 0) lastCapture = captures[^1].Id;
+            if (captures.Count == CaptureBatchSize) Interlocked.Exchange(ref dirty, 1);
+            if (reset) { livePackets.Clear(); livePacketIndex.Clear(); selections.Remove(0); }
+            ReconcileLive(update.FirstId, update.Changed);
+            liveStatus = "";
             if (IsLive)
             {
                 if (reset || SelectedPacket is null) SelectedPacket = livePackets.FirstOrDefault();
@@ -271,17 +282,44 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         finally { Interlocked.Exchange(ref refreshing, 0); }
     }
 
-    private void Reconcile(ObservableCollection<PacketItemViewModel> collection, IReadOnlyList<InspectedPacket> snapshot)
+    private void ReconcileLive(long firstId, IReadOnlyList<InspectedPacket> changed)
     {
-        for (int i = 0; i < snapshot.Count; i++)
+        var selected = SelectedPacket;
+        var selectedField = SelectedField?.Field;
+        int selectedPage = bytePage;
+        int removeCount = 0;
+        while (removeCount < livePackets.Count && livePackets[removeCount].Packet.Id < firstId)
         {
-            if (i >= collection.Count) collection.Add(new(snapshot[i]));
-            else if (!ReferenceEquals(collection[i].Packet, snapshot[i]))
+            livePacketIndex.Remove(livePackets[removeCount].Packet.Id);
+            removeCount++;
+        }
+        bool selectionSurvives = selected is not null && livePacketIndex.ContainsKey(selected.Packet.Id);
+        livePackets.RemoveFirst(removeCount);
+        var added = new List<PacketItemViewModel>();
+        foreach (var packet in changed)
+        {
+            if (livePacketIndex.TryGetValue(packet.Id, out var existing))
             {
-                collection[i].Update(snapshot[i]);
-                if (ReferenceEquals(SelectedPacket, collection[i])) PopulateSelected();
+                existing.Update(packet);
+                if (ReferenceEquals(SelectedPacket, existing)) PopulateSelected();
+            }
+            else
+            {
+                var item = new PacketItemViewModel(packet);
+                added.Add(item);
+                livePacketIndex.Add(packet.Id, item);
             }
         }
+        livePackets.AddRange(added);
+        if (selectionSurvives && !ReferenceEquals(SelectedPacket, selected))
+        {
+            SelectedPacket = selected;
+            if (selectedField is not null) SelectedField = FindField(selectedField);
+            bytePage = Math.Clamp(selectedPage, 0, Math.Max(0, ((selected?.Packet.Bytes.Length ?? 0) - 1) / BytesPerPage));
+            BuildBytePage();
+        }
+        else if (!selectionSurvives && ReferenceEquals(SelectedPacket, selected) && selected is not null)
+            SelectedPacket = null;
     }
 
     partial void OnSelectedPacketChanged(PacketItemViewModel? value)
@@ -313,8 +351,11 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             if (context.Count > 0) Fields.Add(new(new("Контекст обмена", "", [], context)) { IsExpanded = true });
             if (!string.IsNullOrEmpty(selected.Packet.Diagnostic))
                 Fields.Add(new(new("Диагностика", selected.Packet.Diagnostic, [], [])));
+            var availablePacketIds = selected.Packet.RelatedPacketIds.Count > 0
+                ? Packets.Select(packet => packet.Packet.Id).ToHashSet() : null;
             foreach (long id in selected.Packet.RelatedPacketIds)
-                RelatedPackets.Add(new(id, $"Перейти к № {id}"));
+                if (availablePacketIds!.Contains(id))
+                    RelatedPackets.Add(new(id, $"Перейти к № {id}"));
         }
         flatFields = Fields.SelectMany(f => f.Flatten()).ToArray();
         byteOwners = new InspectorFieldViewModel?[SelectedPacket?.Packet.Bytes.Length ?? 0];

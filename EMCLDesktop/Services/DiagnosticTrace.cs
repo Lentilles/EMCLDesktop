@@ -25,6 +25,7 @@ public sealed class DiagnosticTrace
     private const int BytesPerLine = 64;
     private readonly object gate = new();
     private readonly List<Entry> entries = [];
+    private readonly List<TraceCapture> captures = [];
     private int displayFormat;
     private long captureId;
     private long clearedThroughCaptureId;
@@ -62,12 +63,21 @@ public sealed class DiagnosticTrace
     }
 
     // Raw captures are independent of display/export settings; decoding never runs on transport callbacks.
-    public IReadOnlyList<TraceCapture> CapturesAfter(long afterId)
+    public IReadOnlyList<TraceCapture> CapturesAfter(long afterId, int maxCount = int.MaxValue, int? session = null)
     {
+        if (maxCount <= 0) throw new ArgumentOutOfRangeException(nameof(maxCount));
         lock (gate)
-            return entries.Where(e => e.Bytes is not null && e.CaptureId > afterId)
-                .Select(e => new TraceCapture(e.CaptureId, e.SessionId, e.Timestamp, e.Transport,
-                    e.Direction!, e.Framing, e.Bytes!)).ToArray();
+        {
+            int low = 0, high = captures.Count;
+            while (low < high)
+            {
+                int middle = low + (high - low) / 2;
+                if (captures[middle].Id <= afterId || (session.HasValue && captures[middle].SessionId < session.Value))
+                    low = middle + 1;
+                else high = middle;
+            }
+            return captures.GetRange(low, Math.Min(maxCount, captures.Count - low)).ToArray();
+        }
     }
 
     public void Add(string message)
@@ -81,6 +91,7 @@ public sealed class DiagnosticTrace
         lock (gate)
         {
             entries.Clear();
+            captures.Clear();
             clearedThroughCaptureId = captureId;
         }
         NotifyChanged();
@@ -131,8 +142,14 @@ public sealed class DiagnosticTrace
     public void LogBytes(string transport, string direction, ReadOnlySpan<byte> bytes)
     {
         if (bytes.IsEmpty) return;
-        lock (gate) entries.Add(new(DateTimeOffset.Now, null, direction, bytes.ToArray(), transport,
-            ++captureId, sessionId, framing));
+        lock (gate)
+        {
+            var timestamp = DateTimeOffset.Now;
+            byte[] copy = bytes.ToArray();
+            long id = ++captureId;
+            entries.Add(new(timestamp, null, direction, copy, transport, id, sessionId, framing));
+            captures.Add(new(id, sessionId, timestamp, transport, direction, framing, copy));
+        }
         NotifyChanged();
     }
 

@@ -21,7 +21,9 @@ The desktop project targets Windows, Linux, and macOS. Android, iOS, and Browser
 
 The application UI is currently in Russian. Control names in this guide are English translations of the corresponding UI labels.
 
-On macOS, the **EMCL Desktop** application menu includes About and Connection settings (**⌘,**), alongside the standard system commands. The **File** menu provides Load (**⌘O**) and Save (**⌘S**), using the same configuration dialogs as the Objects tab.
+The **About** button at the right end of the status bar shows the application version and update status.
+
+On macOS, the **EMCL Desktop** application menu also includes About and Connection settings (**⌘,**), alongside the standard system commands. The **File** menu provides Load (**⌘O**) and Save (**⌘S**), using the same configuration dialogs as the Objects tab.
 
 ## Features
 
@@ -209,7 +211,9 @@ The inspector parses normal GET/SET/ACTION, GET next/block, HDLC segmentation, n
 
 A response's OBIS is determined from the request with the same Invoke ID within the same connection and address pair. No context is inferred if the request is missing, the Invoke ID is ambiguous, or the frame is damaged. Numeric values remain unscaled until the corresponding register's scaler/unit is found in an earlier exchange. Protected APDUs and unsupported variants are displayed as raw bytes with diagnostics.
 
-Limits per analysis: `16 × 1024 × 1024` text characters, 50,000 entries, 1 MiB per reassembled message, and 4096 segments/blocks. Value field trees are limited to 10,000 nodes and a depth of 64.
+The packet list retains the most recent packets, with a selectable limit from 500 to 50,000 (default 5,000). Older packets leave the inspector and links to them are hidden; changing the text-mode limit requires parsing the text again. Increasing the live limit does not restore packets already removed from the inspector. The full captured trace remains available until cleared and can be saved in a HEX format, but it is kept in memory without a size limit.
+
+Other limits: `16 × 1024 × 1024` text characters, 1 MiB per reassembled message, and 4096 segments/blocks. Value field trees are limited to 10,000 nodes and a depth of 64.
 
 ## Tracing and export
 

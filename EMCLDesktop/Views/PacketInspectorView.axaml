@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:EMCLDesktop.ViewModels"
+             xmlns:converters="using:Avalonia.Data.Converters"
              x:Class="EMCLDesktop.Views.PacketInspectorView"
              x:DataType="vm:PacketInspectorViewModel">
     <UserControl.Styles>
@@ -32,6 +33,44 @@
         </Style>
         <Style Selector="TextBox.analysis-log:pointerover /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+        <Style Selector="ToggleButton.packet-autoscroll">
+            <Setter Property="Background" Value="#22344C" />
+            <Setter Property="Foreground" Value="#ACBED3" />
+            <Setter Property="BorderBrush" Value="#31435B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ToggleButton.packet-autoscroll:checked">
+            <Setter Property="Background" Value="#214A61" />
+            <Setter Property="Foreground" Value="#A5E8FA" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+        <Style Selector="ToggleButton.packet-autoscroll:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#214A61" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+        </Style>
+        <Style Selector="Button.scroll-to-top">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="Background" Value="#214A61" />
+            <Setter Property="BorderBrush" Value="#69C4E1" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#F4F7FC" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.scroll-to-top:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2C6480" />
         </Style>
         <Style Selector="Border.field">
             <Setter Property="Padding" Value="6,4" />
@@ -100,20 +139,49 @@
                     <TextBlock Grid.Row="2" Classes="muted" FontSize="11"
                                Text="Разбор выполняется локально. Текст и выбранный пакет сохраняются при смене режима." />
                 </Grid>
-                <TextBlock Grid.Row="3" Text="{Binding AnalysisStatus}" Classes="muted" FontSize="11" />
-                <ListBox Grid.Row="4" ItemsSource="{Binding Packets}" SelectedItem="{Binding SelectedPacket, Mode=TwoWay}"
-                         Background="Transparent" BorderThickness="0" MinHeight="80"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="vm:PacketItemViewModel">
-                            <StackPanel Spacing="3" Margin="2,4">
-                                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12"
-                                           Classes.packet-error="{Binding HasError}" />
-                                <TextBlock Text="{Binding Details}" Classes="muted" FontSize="11" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <StackPanel Grid.Row="3" Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
+                        <TextBlock Text="Пакетов в списке" Classes="muted" FontSize="10" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding PacketLimitOptions}" SelectedItem="{Binding PacketLimit}"
+                                  Width="70" MinWidth="0" Padding="4,5" FontSize="11"
+                                  ToolTip.Tip="В инспекторе остаются последние пакеты. При увеличении лимита ранее удалённые записи не восстанавливаются. Полная трассировка доступна до очистки."
+                                  AutomationProperties.Name="Максимум пакетов в списке" />
+                        <ToggleButton x:Name="AutoScrollToggle" Grid.Column="2" Classes="packet-autoscroll"
+                                      Content="↓ Автопрокрутка" Click="AutoScrollClick" Padding="4,5" FontSize="10"
+                                      ToolTip.Tip="Следить за последним пакетом" AutomationProperties.Name="Автопрокрутка к последнему пакету" />
+                    </Grid>
+                    <TextBlock Text="{Binding AnalysisStatus}" Classes="muted" FontSize="11" TextWrapping="Wrap"
+                               IsVisible="{Binding AnalysisStatus, Converter={x:Static converters:StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+                <Grid Grid.Row="4">
+                    <ListBox x:Name="PacketList" ItemsSource="{Binding Packets}" SelectedItem="{Binding SelectedPacket, Mode=TwoWay}"
+                             Background="Transparent" BorderThickness="0" MinHeight="80"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PacketItemViewModel">
+                                <StackPanel Spacing="3" Margin="2,4">
+                                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12"
+                                               Classes.packet-error="{Binding HasError}" />
+                                    <TextBlock Text="{Binding Details}" Classes="muted" FontSize="11" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"
+                                VerticalAlignment="Bottom" Margin="0,0,0,10">
+                        <Button x:Name="ScrollToFirstButton" Classes="scroll-to-top" Content="↑" IsVisible="False"
+                                Click="ScrollToFirstClick" PointerEntered="ScrollButtonPointerEntered"
+                                PointerExited="ScrollButtonPointerExited" ToolTip.Tip="К первому пакету в списке"
+                                AutomationProperties.Name="Перейти к первому пакету" />
+                        <Button x:Name="ScrollToLastButton" Classes="scroll-to-top" Content="↓" IsVisible="False"
+                                Click="ScrollToLastClick" PointerEntered="ScrollButtonPointerEntered"
+                                PointerExited="ScrollButtonPointerExited" ToolTip.Tip="К последнему пакету в списке"
+                                AutomationProperties.Name="Перейти к последнему пакету" />
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
         <GridSplitter Grid.Column="1" Classes="workspace-divider" ResizeDirection="Columns" />

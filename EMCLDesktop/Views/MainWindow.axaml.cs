@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = $"EMCL Desktop {ApplicationVersion.Current} — счётчик DLMS/COSEM";
         DesktopUpdates.Current.StatusChanged += OnUpdateStatusChanged;
         Closed += (_, _) => DesktopUpdates.Current.StatusChanged -= OnUpdateStatusChanged;
     }

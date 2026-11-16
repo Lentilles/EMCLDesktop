@@ -24,6 +24,21 @@ public partial class MainView : UserControl
             viewModel.SelectedTabIndex = section;
     }
 
+    private async void AboutClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control source) return;
+        if (TopLevel.GetTopLevel(this) is Window owner && Application.Current is App app)
+        {
+            await app.ShowAboutAsync(owner);
+            return;
+        }
+
+        var dialog = new AboutContent();
+        dialog.CloseRequested += (_, _) => CloseObjectDialog();
+        ShowObjectDialog(dialog, source, 480);
+        dialog.FocusClose();
+    }
+
     private void SettingsNavigationClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { Tag: string section })
@@ -209,7 +224,8 @@ public partial class MainView : UserControl
     {
         base.OnSizeChanged(e);
         if (!DialogOverlay.IsVisible || ObjectDialog.Content is not Control dialog) return;
-        ObjectDialog.Width = Math.Min(dialog is AttributeDialog ? 680 : 420, Math.Max(0, e.NewSize.Width - 32));
+        ObjectDialog.Width = Math.Min(dialog switch { AttributeDialog => 680, AboutContent => 480, _ => 420 },
+            Math.Max(0, e.NewSize.Width - 32));
         ObjectDialog.MaxHeight = Math.Max(0, e.NewSize.Height - 32);
     }
 
