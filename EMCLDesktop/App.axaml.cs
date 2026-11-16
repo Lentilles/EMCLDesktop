@@ -71,7 +71,7 @@ public partial class App : Application
     private void ConnectionSettingsMenuItemClick(object? sender, System.EventArgs e)
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
-            { MainWindow.Content: MainView mainView })
-            mainView.OpenConnectionSettings();
+            { MainWindow: MainWindow mainWindow })
+            mainWindow.OpenConnectionSettings();
     }
 }

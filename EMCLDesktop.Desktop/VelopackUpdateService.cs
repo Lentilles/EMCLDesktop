@@ -15,8 +15,10 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
     private UpdateManager? manager;
     private Task? check;
     private string status = "Проверка обновлений ещё не выполнялась.";
+    private volatile bool isUpdateReady;
 
     public string Status => status;
+    public bool IsUpdateReady => isUpdateReady;
     public event EventHandler? StatusChanged;
 
     private void SetStatus(string value)
@@ -40,6 +42,7 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
 
             if (manager.UpdatePendingRestart is not null)
             {
+                isUpdateReady = true;
                 SetStatus("Обновление загружено и будет установлено при закрытии приложения.");
                 return;
             }
@@ -55,6 +58,8 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
 
             SetStatus("Загрузка обновления…");
             await manager.DownloadUpdatesAsync(update, cancelToken: stopping.Token);
+            if (stopping.IsCancellationRequested) return;
+            isUpdateReady = true;
             SetStatus("Обновление загружено и будет установлено при закрытии приложения.");
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested) { }

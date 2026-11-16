@@ -95,15 +95,6 @@ jobs:
             -p:DebugType=None -p:DebugSymbols=false \
             -o artifacts/publish
 
-      - name: Package release
-        env:
-          APP_VERSION: ${{ steps.version.outputs.value }}
-          APP_RID: ${{ matrix.rid }}
-        run: |
-          python .github/scripts/package-release.py \
-            --rid "$APP_RID" --version "$APP_VERSION" \
-            --publish artifacts/publish --output artifacts/release --emcl ../EMCL
-
       - name: Install Velopack CLI
         run: dotnet tool install vpk --tool-path "$RUNNER_TEMP/vpk" --version 1.2.0
 
@@ -136,15 +127,6 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-      - name: Upload release package
-        uses: actions/upload-artifact@v7
-        with:
-          name: package-${{ matrix.rid }}
-          path: EMCLDesktop/artifacts/release/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-
   release:
     name: Publish GitHub Release
     needs: build
@@ -160,13 +142,6 @@ jobs:
           path: source
           persist-credentials: false
 
-      - name: Download all six packages
-        uses: actions/download-artifact@v8
-        with:
-          pattern: package-*
-          path: release
-          merge-multiple: true
-
       - name: Download Velopack packages
         uses: actions/download-artifact@v8
         with:
@@ -180,23 +155,9 @@ jobs:
 
       - name: Verify packages and calculate checksums
         working-directory: release
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          version="${RELEASE_TAG#v}"
-          files=(
-            "EMCLDesktop-${version}-win-x64.zip"
-            "EMCLDesktop-${version}-win-arm64.zip"
-            "EMCLDesktop-${version}-linux-x64.tar.gz"
-            "EMCLDesktop-${version}-linux-arm64.tar.gz"
-            "EMCLDesktop-${version}-osx-x64.dmg"
-            "EMCLDesktop-${version}-osx-arm64.dmg"
-          )
-          for file in "${files[@]}"; do
-            test -s "$file"
-          done
-          sha256sum "${files[@]}" > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 
       - name: Publish complete release
         env:
