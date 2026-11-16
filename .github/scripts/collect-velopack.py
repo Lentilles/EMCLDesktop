@@ -19,12 +19,19 @@ for rid in rids:
         raise SystemExit(f"Incomplete Velopack package for {rid}: {installers}")
     full = full_packages[0]
     data = json.loads(feed.read_text(encoding="utf-8"))
-    if not any(asset.get("FileName") == full.name and asset.get("PackageId") == app_id
-               and asset.get("Type") == "Full" and asset.get("Version") == version
-               for asset in data.get("Assets", [])):
+    matching = [asset for asset in data.get("Assets", [])
+                if asset.get("FileName") == full.name and asset.get("PackageId") == app_id
+                and asset.get("Type") == "Full" and asset.get("Version") == version]
+    if len(matching) != 1:
         raise SystemExit(f"Feed for {rid} does not reference {full.name}")
-    for path in (full, feed, *installers):
-        if path.name in collected:
-            raise SystemExit(f"Duplicate release asset: {path.name}")
-        collected.add(path.name)
-        shutil.copy2(path, target / path.name)
+    full_name = f"EMCLDesktop-full-{rid}.nupkg"
+    installer_name = f"EMCLDesktop-Setup-{rid}{extension}"
+    for name in (full_name, feed.name, installer_name):
+        if name in collected:
+            raise SystemExit(f"Duplicate release asset: {name}")
+        collected.add(name)
+    shutil.copy2(full, target / full_name)
+    shutil.copy2(installers[0], target / installer_name)
+    matching[0]["FileName"] = full_name
+    data["Assets"] = matching
+    (target / feed.name).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

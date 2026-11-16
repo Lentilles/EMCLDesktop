@@ -4,13 +4,13 @@
 
 Download the installer for your computer from the [latest GitHub Release](https://github.com/Lentilles/EMCLDesktop/releases/latest). Choose `x64` for Intel or AMD 64-bit processors, or `arm64` for ARM64 processors such as Apple Silicon and Windows on ARM.
 
-- **Windows:** download and run `EMCLDesktop-win-<arch>-win-<arch>-Setup.exe`.
-- **macOS:** download and open `EMCLDesktop-osx-<arch>-osx-<arch>-Setup.pkg`, then follow the installer. The package is not signed with a Developer ID or notarized; macOS may block it. See the [macOS distribution notes](#macos-distribution).
-- **Linux:** download `EMCLDesktop-linux-<arch>-linux-<arch>.AppImage` into a folder you can write to. Make it executable and run it, replacing the filename below with the downloaded file:
+- **Windows:** download and run `EMCLDesktop-Setup-win-<arch>.exe`.
+- **macOS:** download and open `EMCLDesktop-Setup-osx-<arch>.pkg`, then follow the installer. The package is not signed with a Developer ID or notarized; macOS may block it. See the [macOS distribution notes](#macos-distribution).
+- **Linux:** download `EMCLDesktop-Setup-linux-<arch>.AppImage` into a folder you can write to. Make it executable and run it, replacing the filename below with the downloaded file:
 
   ```sh
-  chmod +x EMCLDesktop-linux-x64-linux-x64.AppImage
-  ./EMCLDesktop-linux-x64-linux-x64.AppImage
+  chmod +x EMCLDesktop-Setup-linux-x64.AppImage
+  ./EMCLDesktop-Setup-linux-x64.AppImage
   ```
 
 Updates download automatically. When notified, close the application and open it again to use the new version.
@@ -74,7 +74,7 @@ The command creates a publish directory containing the executable and its depend
 
 Velopack builds check the latest stable GitHub Release after the window opens and download updates in the background. A notification appears when an update is ready. The update is installed when the application closes, after the meter connection has been released; the new version starts the next time the application is opened. Network or download errors do not prevent normal use, and the check is retried on the next launch.
 
-Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-<rid>` setup on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
+Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-Setup-<rid>.exe` installer on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
 
 Each architecture has its own update channel. Releases contain complete update packages; prereleases and delta packages are not used. macOS Velopack builds are not signed with a Developer ID or notarized and may be blocked by Gatekeeper; see the macOS distribution notes below. When multiple application instances are open, installation is deferred rather than deliberately closing the other instances.
 
@@ -82,9 +82,9 @@ The [Build and release](.github/workflows/release.yml) workflow runs on pushes, 
 
 | Platform | Release package |
 | --- | --- |
-| Windows x64 / ARM64 | `EMCLDesktop-win-<arch>-win-<arch>-Setup.exe` |
-| Linux x64 / ARM64 | `EMCLDesktop-linux-<arch>-linux-<arch>.AppImage` |
-| macOS Intel / Apple Silicon | `EMCLDesktop-osx-<arch>-osx-<arch>-Setup.pkg` |
+| Windows x64 / ARM64 | `EMCLDesktop-Setup-win-<arch>.exe` |
+| Linux x64 / ARM64 | `EMCLDesktop-Setup-linux-<arch>.AppImage` |
+| macOS Intel / Apple Silicon | `EMCLDesktop-Setup-osx-<arch>.pkg` |
 
 To publish a release, commit your changes and push a version tag to GitHub:
 
@@ -93,7 +93,7 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Once all six builds succeed, the workflow creates a GitHub Release with the packages, release notes, and a `SHA256SUMS` file. To supply a changelog, add `.github/release-notes/<tag>.md` to the tagged commit. For example, `.github/release-notes/v1.2.3.md` becomes the description for release `v1.2.3`. GitHub generates notes for new releases without a matching file. Tags with a suffix, such as `v1.2.3-rc.1`, create a prerelease. The version number is included in the build and package name. Rerunning the workflow does not replace assets of an already published release; an unfinished draft can be completed and published.
+Once all six builds succeed, the workflow creates a GitHub Release with the packages, release notes, and a `SHA256SUMS` file. To supply a changelog, add `.github/release-notes/<tag>.md` to the tagged commit. For example, `.github/release-notes/v1.2.3.md` becomes the description for release `v1.2.3`. GitHub generates notes for new releases without a matching file. Tags with a suffix, such as `v1.2.3-rc.1`, create a prerelease. The version number is included in the build and update metadata; release asset names identify the package type and runtime. Rerunning the workflow does not replace assets of an already published release; an unfinished draft can be completed and published.
 
 [Release notes by version](.github/release-notes) are also available in the repository. To apply historical notes to an existing GitHub Release, edit its description on GitHub or run `gh release edit <tag> --notes-file .github/release-notes/<tag>.md`.
 
