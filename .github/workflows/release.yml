@@ -81,8 +81,8 @@ jobs:
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Run checks on native architecture
-        run: dotnet run --project Tests/TraceChecks/TraceChecks.csproj -c Release
+      - name: Run tests on native architecture
+        run: dotnet test Tests/EMCLDesktop.Tests/EMCLDesktop.Tests.csproj -c Release
 
       - name: Publish self-contained application
         env:
