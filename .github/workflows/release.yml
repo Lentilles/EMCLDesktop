@@ -77,7 +77,7 @@ jobs:
             fi
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+            version="0.0.1-ci.${GITHUB_RUN_NUMBER}"
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
