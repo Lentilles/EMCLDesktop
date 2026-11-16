@@ -24,8 +24,8 @@ for rid in rids:
                 and asset.get("Type") == "Full" and asset.get("Version") == version]
     if len(matching) != 1:
         raise SystemExit(f"Feed for {rid} does not reference {full.name}")
-    full_name = f"EMCLDesktop-full-{rid}.nupkg"
-    installer_name = f"EMCLDesktop-Setup-{rid}{extension}"
+    full_name = f"EMCLDesktop-Update-{rid}.nupkg"
+    installer_name = f"EMCLDesktop-Install-{rid}{extension}"
     for name in (full_name, feed.name, installer_name):
         if name in collected:
             raise SystemExit(f"Duplicate release asset: {name}")

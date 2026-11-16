@@ -4,13 +4,13 @@
 
 Download the installer for your computer from the [latest GitHub Release](https://github.com/Lentilles/EMCLDesktop/releases/latest). Choose `x64` for Intel or AMD 64-bit processors, or `arm64` for ARM64 processors such as Apple Silicon and Windows on ARM.
 
-- **Windows:** download and run `EMCLDesktop-Setup-win-<arch>.exe`.
-- **macOS:** download and open `EMCLDesktop-Setup-osx-<arch>.pkg`, then follow the installer. The package is not signed with a Developer ID or notarized; macOS may block it. See the [macOS distribution notes](#macos-distribution).
-- **Linux:** download `EMCLDesktop-Setup-linux-<arch>.AppImage` into a folder you can write to. Make it executable and run it, replacing the filename below with the downloaded file:
+- **Windows:** download and run `EMCLDesktop-Install-win-<arch>.exe`.
+- **macOS:** download and open `EMCLDesktop-Install-osx-<arch>.pkg`, then follow the installer. The package is not signed with a Developer ID or notarized; macOS may block it. See the [macOS distribution notes](#macos-distribution).
+- **Linux:** download `EMCLDesktop-Install-linux-<arch>.AppImage` into a folder you can write to. Make it executable and run it, replacing the filename below with the downloaded file:
 
   ```sh
-  chmod +x EMCLDesktop-Setup-linux-x64.AppImage
-  ./EMCLDesktop-Setup-linux-x64.AppImage
+  chmod +x EMCLDesktop-Install-linux-x64.AppImage
+  ./EMCLDesktop-Install-linux-x64.AppImage
   ```
 
 Updates download automatically. When notified, close the application and open it again to use the new version.
@@ -74,7 +74,7 @@ The command creates a publish directory containing the executable and its depend
 
 Velopack builds check the latest stable GitHub Release after the window opens and download updates in the background. A notification appears when an update is ready. The update is installed when the application closes, after the meter connection has been released; the new version starts the next time the application is opened. Network or download errors do not prevent normal use, and the check is retried on the next launch.
 
-Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-Setup-<rid>.exe` installer on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
+Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates, install the Velopack package for your operating system and architecture once: use the `EMCLDesktop-Install-<rid>.exe` installer on Windows, the `.pkg` on macOS, or the corresponding `.AppImage` on Linux. Linux users must make the AppImage executable (for example, `chmod +x EMCLDesktop-*.AppImage`) and keep it in a directory they can write to. User data should be kept outside the application installation directory.
 
 Each architecture has its own update channel. Releases contain complete update packages; prereleases and delta packages are not used. macOS Velopack builds are not signed with a Developer ID or notarized and may be blocked by Gatekeeper; see the macOS distribution notes below. When multiple application instances are open, installation is deferred rather than deliberately closing the other instances.
 
@@ -82,9 +82,9 @@ The [Build and release](.github/workflows/release.yml) workflow runs on pushes, 
 
 | Platform | Release package |
 | --- | --- |
-| Windows x64 / ARM64 | `EMCLDesktop-Setup-win-<arch>.exe` |
-| Linux x64 / ARM64 | `EMCLDesktop-Setup-linux-<arch>.AppImage` |
-| macOS Intel / Apple Silicon | `EMCLDesktop-Setup-osx-<arch>.pkg` |
+| Windows x64 / ARM64 | `EMCLDesktop-Install-win-<arch>.exe` |
+| Linux x64 / ARM64 | `EMCLDesktop-Install-linux-<arch>.AppImage` |
+| macOS Intel / Apple Silicon | `EMCLDesktop-Install-osx-<arch>.pkg` |
 
 To publish a release, commit your changes and push a version tag to GitHub:
 
