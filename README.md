@@ -26,7 +26,7 @@ On macOS, the **EMCL Desktop** application menu includes About and Connection se
 ## Features
 
 - TCP and serial connections with Wrapper / HDLC framing.
-- Association LN versions 1 and 3, with `None`, `Low`, and `High` authentication.
+- Association LN versions 1 and 3, with `None`, `Low`, `High`, and `HighGMAC` authentication.
 - Object catalog searchable by OBIS, class name, and class ID, including regular expressions.
 - Read individual attributes, all attributes of an object, and Profile Generic tables.
 - Write typed attribute values with input validation and read-back after a confirmed SET.
@@ -127,9 +127,11 @@ Selecting an object does not read its values. A saved catalog remains visible af
 | Serial | Refreshable port list, BaudRate, DataBits, Parity, StopBits, Handshake, DTR, and RTS |
 | Framing | Wrapper or HDLC; HDLC also supports a physical server address and extended address format |
 | Association | Client and server addresses, Association LN version, association OBIS, Conformance, maximum PDU size |
-| Authentication | `None`, `Low`, `High`; password as UTF-8, HEX, or an environment variable name |
+| Authentication | `None`, `Low`, `High`, `HighGMAC`; password as UTF-8, HEX, or an environment variable name |
 | Communication | Connection timeout, No traffic interval, KeepAlive, handling of identical `object_list` entries |
 | Advanced | High request priority, acceptance of mismatched response octets |
+
+`HighGMAC` has a separate settings section for the 16-byte authentication and block cipher keys, the 8-byte client and meter system titles (all in HEX), and the initial outgoing invocation counter. The app connects directly without reading the counter from the meter. It durably reserves counters across restarts and uses the greater of the entered and saved values; make sure the entered value is acceptable to the meter and coordinate other clients using the same key and client system title. HighGMAC uses authentication and encryption and requires `Action` in Conformance. JSON profiles store HighGMAC keys without encryption.
 
 `High` authentication requires a 16-byte secret. All supported Conformance flags are enabled by default and can be toggled individually; loading a JSON configuration restores them from the file. Reading the association requires `Get`; `High` authentication also requires `Action`.
 

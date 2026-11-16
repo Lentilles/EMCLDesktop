@@ -650,6 +650,7 @@
                             <Button Classes="settings-navigation" Content="Подключение" Tag="Connection" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Адресация" Tag="Address" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Ассоциация и доступ" Tag="Association" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
+                            <Button Classes="settings-navigation" Content="HighGMAC" Tag="HighGMAC" Click="SettingsNavigationClick" IsVisible="{Binding IsHighGmac}" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Параметры обмена" Tag="Exchange" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                             <Button Classes="settings-navigation" Content="Продвинутые настройки" Tag="Advanced" Click="SettingsNavigationClick" HorizontalAlignment="Stretch" />
                         </StackPanel>

@@ -14,6 +14,7 @@ public partial class ConnectionSettingsView : UserControl
             "Connection" => ConnectionSection,
             "Address" => AddressSection,
             "Association" => AssociationSection,
+            "HighGMAC" => HighGmacSection,
             "Exchange" => ExchangeSection,
             "Advanced" => AdvancedSection,
             _ => null

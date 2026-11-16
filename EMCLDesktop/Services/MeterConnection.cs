@@ -30,6 +30,7 @@ public sealed record MeterConnectionOptions(
 {
     internal const double DefaultHdlcAcknowledgementTimeoutSeconds = 1;
 
+    public HighGmacSettings? HighGmac { get; init; }
     public int HdlcInformationFrameRetryCount { get; init; }
     public double HdlcAcknowledgementTimeoutSeconds { get; init; } = DefaultHdlcAcknowledgementTimeoutSeconds;
     public HdlcLinkParameters? HdlcParameters { get; init; }
@@ -159,13 +160,15 @@ public sealed class MeterConnection : IAsyncDisposable
         if ((options.Conformance & DlmsConformance.Get) == 0 ||
             (options.Conformance & ~LnAssociationOptions.SupportedConformance) != 0)
             throw new ArgumentException("Conformance должен включать Get и только поддерживаемые службы.");
-        if (options.Authentication == ClientAuthentication.High &&
+        if ((options.Authentication == ClientAuthentication.High || options.HighGmac is not null) &&
             (options.Conformance & DlmsConformance.Action) == 0)
             throw new ArgumentException("Для High нужен Action в Conformance.");
         if (options.Priority == InvokePriority.High &&
             (options.Conformance & DlmsConformance.PriorityManagement) == 0)
             throw new ArgumentException("Для высокого приоритета запросов включите PriorityManagement в Conformance.");
 
+        var security = options.HighGmac?.CreateProtocol(new PersistentInvocationCounterStore(
+            PersistentInvocationCounterStore.DefaultDirectory, options.HighGmac.ParseInitialCounter()));
         var idleTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
         var framing = options.CreateFraming(trace);
         var password = Password(options);
@@ -196,6 +199,7 @@ public sealed class MeterConnection : IAsyncDisposable
                 Association = new LnAssociationOptions
                 {
                     Authentication = options.Authentication,
+                    Security = security,
                     Password = password,
                     MaxReceivePduSize = options.MaxReceivePduSize,
                     Conformance = options.Conformance,
@@ -212,7 +216,7 @@ public sealed class MeterConnection : IAsyncDisposable
         {
             await session.AssociateAsync(cancellationToken);
             var associationName = LogicalName.Parse(options.AssociationObis);
-            return new MeterConnection(session, options.Authentication,
+            return new MeterConnection(session, options.HighGmac is null ? options.Authentication : ClientAuthentication.High,
                 associationName, TimeSpan.FromSeconds(options.KeepAliveIntervalSeconds), options);
         }
         catch
@@ -248,10 +252,12 @@ public sealed class MeterConnection : IAsyncDisposable
                 mode is AttributeAccessModeV1.AuthenticatedReadOnly or AttributeAccessModeV1.AuthenticatedReadWrite;
         }
         var flags = (AccessModeV3)access.RawMode;
-        const AccessModeV3 protectedFlags = AccessModeV3.AuthenticatedRequest |
+        AccessModeV3 protectedFlags = AccessModeV3.AuthenticatedRequest |
             AccessModeV3.EncryptedRequest | AccessModeV3.SignedRequest |
             AccessModeV3.AuthenticatedResponse | AccessModeV3.EncryptedResponse |
             AccessModeV3.SignedResponse;
+        if (options.HighGmac is not null)
+            protectedFlags = AccessModeV3.SignedRequest | AccessModeV3.SignedResponse;
         return flags.HasFlag(AccessModeV3.Read) && (flags & protectedFlags) == 0;
     }
 
@@ -271,6 +277,10 @@ public sealed class MeterConnection : IAsyncDisposable
             ((AccessModeV3)access.RawMode is AccessModeV3.Write or (AccessModeV3.Write | AccessModeV3.Read));
     }
 
+    private static bool AllowsProtectedV3(byte? mode, AccessModeV3 operation) =>
+        mode is byte raw && ((AccessModeV3)raw & operation) != 0 &&
+        ((AccessModeV3)raw & (AccessModeV3.SignedRequest | AccessModeV3.SignedResponse)) == 0;
+
     public string WriteUnavailableReason(ushort classId, LogicalName obis, sbyte index)
     {
         if (!IsActive) return "Подключитесь к счётчику для записи.";
@@ -283,7 +293,9 @@ public sealed class MeterConnection : IAsyncDisposable
             !Association.Access.Rights.TryGetValue(obis, out var rights))
             return "Объект отсутствует в дереве текущего соединения.";
         var access = rights.Attributes.FirstOrDefault(item => item.Index == index);
-        return AllowsWrite(access, options.AssociationVersion, authentication) ? "" :
+        return (options.HighGmac is not null && options.AssociationVersion == 3
+            ? AllowsProtectedV3(access?.RawMode, AccessModeV3.Write)
+            : AllowsWrite(access, options.AssociationVersion, authentication)) ? "" :
             "Ассоциация не разрешает запись либо требует неподдерживаемой защиты сообщений.";
     }
 
@@ -329,6 +341,7 @@ public sealed class MeterConnection : IAsyncDisposable
         {
             (1, (byte)MethodAccessModeV1.Access) or (3, (byte)AccessModeV3.Invoke) => true,
             (1, (byte)MethodAccessModeV1.AuthenticatedAccess) => authentication != ClientAuthentication.None,
+            (3, byte mode) when options.HighGmac is not null => AllowsProtectedV3(mode, AccessModeV3.Invoke),
             _ => false
         };
         return allowed ? "" : "Ассоциация не разрешает вызов либо требует неподдерживаемой защиты сообщений.";

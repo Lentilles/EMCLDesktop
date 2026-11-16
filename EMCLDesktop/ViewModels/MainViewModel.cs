@@ -52,7 +52,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public IReadOnlyList<Handshake> SerialHandshakes { get; } = Enum.GetValues<Handshake>();
     public IReadOnlyList<string> Framings { get; } = ["Wrapper", "HDLC"];
     public IReadOnlyList<int> HdlcRetryCounts { get; } = [0, 1];
-    public IReadOnlyList<string> Authentications { get; } = ["None", "Low", "High"];
+    public IReadOnlyList<string> Authentications { get; } = ["None", "Low", "High", "HighGMAC"];
     public IReadOnlyList<string> PasswordFormats { get; } = ["UTF-8", "Hex", "Environment"];
     public IReadOnlyList<string> TraceFormats { get; } =
         ["Словесный", "Словесный + HEX", "Чистый HEX TX/RX"];
@@ -102,6 +102,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     [ObservableProperty] public partial string AssociationVersion { get; set; } = "1";
     [ObservableProperty] public partial string AssociationObis { get; set; } = "0.0.40.0.0.255";
     [ObservableProperty] public partial string Authentication { get; set; } = "High";
+    [ObservableProperty] public partial string GmacAuthenticationKey { get; set; } = "";
+    [ObservableProperty] public partial string GmacBlockCipherKey { get; set; } = "";
+    [ObservableProperty] public partial string GmacClientSystemTitle { get; set; } = "4142434445464748";
+    [ObservableProperty] public partial string GmacServerSystemTitle { get; set; } = "";
+    [ObservableProperty] public partial string GmacInitialCounter { get; set; } = "";
     [ObservableProperty] public partial string Password { get; set; } = "0000000100000001";
     [ObservableProperty] public partial string PasswordFormat { get; set; } = "UTF-8";
     [ObservableProperty] public partial bool UseFixedInvokeC1 { get; set; }
@@ -161,7 +166,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     public bool IsSerial => Transport == "Serial";
     public bool CanSetSerialRts => SerialHandshake is not (Handshake.RequestToSend or Handshake.RequestToSendXOnXOff);
     public bool IsHdlc => Framing == "HDLC";
-    public bool HasPassword => Authentication != "None";
+    public bool HasPassword => Authentication is "Low" or "High";
+    public bool IsHighGmac => Authentication == "HighGMAC";
     public bool CanUseFixedInvokeC1 => Authentication == "High" && !UseHighPriority;
     public bool HasNoSelectedObject => SelectedObject is null;
     public string ConnectionState => IsConnecting ?
@@ -316,6 +322,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnAuthenticationChanged(string value)
     {
         OnPropertyChanged(nameof(HasPassword));
+        OnPropertyChanged(nameof(IsHighGmac));
         OnPropertyChanged(nameof(CanUseFixedInvokeC1));
     }
     private void NotifyConnectionDisplayChanged()
@@ -397,16 +404,38 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             if (root.TryGetProperty("format", out var format) &&
                 format.GetString() is not (SavedConfiguration.Format or SavedConfiguration.LegacyFormat))
                 throw new FormatException("Неизвестный формат конфигурации.");
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new FormatException("Конфигурация должна быть объектом JSON.");
+            var loadWarnings = new List<string>();
             if (root.TryGetProperty("schemaVersion", out var schemaVersion) &&
                 schemaVersion.GetInt32() != SavedConfiguration.Version)
-                throw new FormatException("Неподдерживаемая версия сохранённой конфигурации.");
+                loadWarnings.Add("версия формата отличается; незнакомые поля пропущены");
+            using var emptyDocument = JsonDocument.Parse("{}");
+            var emptyObject = emptyDocument.RootElement;
+            JsonElement ObjectOrEmpty(JsonElement parent, string name)
+            {
+                if (!parent.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+                    return emptyObject;
+                if (value.ValueKind != JsonValueKind.Object)
+                    throw new FormatException($"Раздел {name} должен быть объектом JSON.");
+                return value;
+            }
             MeterObjectViewModel[]? savedObjects = null;
+            bool preserveCatalog = false;
             if (root.TryGetProperty("catalog", out var catalogElement))
             {
-                var catalog = JsonSerializer.Deserialize<SavedCatalog>(
-                    catalogElement.GetRawText(), SavedConfiguration.JsonOptions)
-                    ?? throw new FormatException("Не удалось прочитать сохранённый каталог.");
-                savedObjects = SavedConfiguration.RestoreCatalog(catalog);
+                try
+                {
+                    var catalog = JsonSerializer.Deserialize<SavedCatalog>(
+                        catalogElement.GetRawText(), SavedConfiguration.JsonOptions)
+                        ?? throw new FormatException("Не удалось прочитать сохранённый каталог.");
+                    savedObjects = SavedConfiguration.RestoreCatalog(catalog);
+                }
+                catch (Exception error) when (error is JsonException or FormatException or ArgumentException or InvalidOperationException)
+                {
+                    preserveCatalog = true;
+                    loadWarnings.Add("каталог не удалось прочитать и он не заменён");
+                }
             }
             bool legacy = root.TryGetProperty("connection", out var connectionSettings);
             JsonElement framingSettings;
@@ -416,24 +445,28 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             }
             else
             {
-                var channel = root.GetProperty("channel");
-                connectionSettings = channel.GetProperty("connection");
-                framingSettings = channel.GetProperty("framing");
+                var channel = ObjectOrEmpty(root, "channel");
+                connectionSettings = ObjectOrEmpty(channel, "connection");
+                framingSettings = ObjectOrEmpty(channel, "framing");
             }
-            var association = root.GetProperty("association");
+            var association = ObjectOrEmpty(root, "association");
+            if (connectionSettings.ValueKind != JsonValueKind.Object || framingSettings.ValueKind != JsonValueKind.Object)
+                throw new FormatException("Раздел подключения должен быть объектом JSON.");
+            if (connectionSettings.GetRawText() == "{}" || association.GetRawText() == "{}")
+                loadWarnings.Add("часть настроек отсутствует; проверьте параметры перед подключением");
             var importedTransport = legacy ? "TCP" : GetString(connectionSettings, "kind", "Tcp") switch
             {
                 "Tcp" => "TCP",
                 "Serial" => "Serial",
                 _ => throw new FormatException("Тип подключения должен быть Tcp или Serial.")
             };
-            var importedHost = importedTransport == "TCP" ? connectionSettings.GetProperty("host").GetString() ?? "" : Host;
-            var importedPort = importedTransport == "TCP" ? connectionSettings.GetProperty("tcpPort").GetInt32() : 0;
+            var importedHost = importedTransport == "TCP" ? GetString(connectionSettings, "host", Host) : Host;
+            var importedPort = importedTransport == "TCP" ? GetInt(connectionSettings, "tcpPort", int.TryParse(TcpPort, out var previousPort) ? previousPort : 0) : 0;
             SerialPortSettings? importedSerial = null;
             if (importedTransport == "Serial")
             {
                 importedSerial = new SerialPortSettings(
-                    GetString(connectionSettings, "portName", ""),
+                    GetString(connectionSettings, "portName", SerialPortName),
                     GetInt(connectionSettings, "baudRate", 9600),
                     GetInt(connectionSettings, "dataBits", 8),
                     Enum.Parse<Parity>(GetString(connectionSettings, "parity", "None"), true),
@@ -441,7 +474,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                     Enum.Parse<Handshake>(GetString(connectionSettings, "handshake", "None"), true),
                     GetBool(connectionSettings, "dtrEnable", false),
                     GetBool(connectionSettings, "rtsEnable", false));
-                importedSerial.Validate();
+                if (connectionSettings.TryGetProperty("portName", out var importedPortName) &&
+                    importedPortName.ValueKind != JsonValueKind.Null && !string.IsNullOrWhiteSpace(importedSerial.PortName))
+                    importedSerial.Validate();
             }
             var importedFraming = legacy
                 ? (GetString(framingSettings, "transport", "WrapperTcp") == "HdlcTcp" ? "HDLC" : "Wrapper")
@@ -515,9 +550,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             operation.Token.ThrowIfCancellationRequested();
             ++selectionVersion;
             SelectedObject = null;
-            Objects.Clear();
-            VisibleGroups.Clear();
-            VisibleObjectCount = 0;
+            if (!preserveCatalog)
+            {
+                Objects.Clear();
+                VisibleGroups.Clear();
+                VisibleObjectCount = 0;
+            }
             Transport = importedTransport;
             if (importedSerial is not null)
             {
@@ -535,6 +573,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 Host = importedHost;
                 TcpPort = importedPort.ToString(CultureInfo.InvariantCulture);
             }
+            if (framingSettings.ValueKind == JsonValueKind.Object && framingSettings.GetRawText() != "{}")
+            {
             Framing = importedFraming;
             ClientAddress = importedClient;
             ServerAddress = importedServer;
@@ -548,9 +588,17 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             AreHdlcSizesLinked = HdlcMaxTxBytes == HdlcMaxRxBytes;
             HdlcInformationFrameRetryCount = importedHdlcRetryCount;
             HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
-            AssociationVersion = association.GetProperty("version").GetByte().ToString(CultureInfo.InvariantCulture);
-            AssociationObis = association.GetProperty("logicalName").GetString() ?? "";
-            Authentication = GetString(association, "authentication", "None");
+            }
+            if (association.GetRawText() != "{}")
+            {
+            AssociationVersion = GetInt(association, "version", int.TryParse(AssociationVersion, out var previousVersion) ? previousVersion : 1).ToString(CultureInfo.InvariantCulture);
+            AssociationObis = GetString(association, "logicalName", AssociationObis);
+            Authentication = GetString(association, "authentication", Authentication);
+            GmacAuthenticationKey = GetString(association, "gmacAuthenticationKey", "");
+            GmacBlockCipherKey = GetString(association, "gmacBlockCipherKey", "");
+            GmacClientSystemTitle = GetString(association, "gmacClientSystemTitle", "4142434445464748");
+            GmacServerSystemTitle = GetString(association, "gmacServerSystemTitle", "");
+            GmacInitialCounter = GetString(association, "gmacInitialCounter", "");
             UseFixedInvokeC1 = importedUseFixedInvokeC1;
             UseHighPriority = importedUseHighPriority;
             IgnoreInvokeIdValidation = importedIgnoreInvokeIdValidation;
@@ -566,6 +614,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             foreach (var option in ConformanceOptions)
                 option.IsSelected = (importedConformance & option.Flag) == option.Flag;
             IgnoreIdenticalObjectListEntries = GetBool(association, "ignoreIdenticalObjectListEntries", false);
+            }
             limits = importedLimits;
             if (savedObjects != null)
             {
@@ -577,6 +626,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             {
                 Status = "Настройки загружены из JSON. Проверьте поля и подключитесь.";
             }
+            if (loadWarnings.Count > 0)
+                Status += " " + string.Join("; ", loadWarnings) + ".";
         }
         catch (Exception) when (operation.IsCancellationRequested)
         {
@@ -646,13 +697,18 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 {
                     version = options.AssociationVersion,
                     logicalName = options.AssociationObis,
-                    authentication = options.Authentication.ToString(),
+                    authentication = options.HighGmac is null ? options.Authentication.ToString() : "HighGMAC",
+                    gmacAuthenticationKey = options.HighGmac?.AuthenticationKey,
+                    gmacBlockCipherKey = options.HighGmac?.BlockCipherKey,
+                    gmacClientSystemTitle = options.HighGmac?.ClientSystemTitle,
+                    gmacServerSystemTitle = options.HighGmac?.ServerSystemTitle,
+                    gmacInitialCounter = options.HighGmac?.InitialCounter,
                     useFixedInvokeC1 = options.UseFixedInvokeC1,
                     useHighPriority = UseHighPriority,
                     ignoreInvokeIdValidation = options.IgnoreInvokeIdValidation,
-                    password = options.PasswordFormat == "UTF-8" ? options.Password : null,
-                    passwordHex = options.PasswordFormat == "Hex" ? options.Password : null,
-                    passwordEnvironmentVariable = options.PasswordFormat == "Environment" ? options.Password : null,
+                    password = options.HighGmac is null && options.PasswordFormat == "UTF-8" ? options.Password : null,
+                    passwordHex = options.HighGmac is null && options.PasswordFormat == "Hex" ? options.Password : null,
+                    passwordEnvironmentVariable = options.HighGmac is null && options.PasswordFormat == "Environment" ? options.Password : null,
                     conformance = options.Conformance.ToString(),
                     requestTimeoutSeconds = options.RequestTimeoutSeconds,
                     keepAliveIntervalSeconds = options.KeepAliveIntervalSeconds,
@@ -875,7 +931,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                       $"сервер={attemptedOptions.ServerAddress}, " +
                       $"физический адрес={attemptedOptions.ServerPhysicalAddress?.ToString() ?? "нет"}, " +
                       $"расширенный адрес={attemptedOptions.ExtendedHdlcAddress}, " +
-                      $"аутентификация={attemptedOptions.Authentication}, " +
+                      $"аутентификация={(attemptedOptions.HighGmac is null ? attemptedOptions.Authentication.ToString() : "HighGMAC")}, " +
                       $"Conformance={attemptedOptions.Conformance}, " +
                       $"Max PDU={attemptedOptions.MaxReceivePduSize}; пароль скрыт");
             string requestPriority = attemptedOptions.FixedInvokeIdAndPriority is byte fixedInvoke
@@ -956,7 +1012,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                      "DLMS-ассоциацию (AARE: result=1, diagnostic=1; причина не указана). " +
                      $"Соединение {attemptedOptions.Framing} установлено, отказ получен при согласовании доступа. " +
                      $"Проверьте, что порт ведёт к нужному счётчику, и сверьте адрес клиента " +
-                     $"{attemptedOptions.ClientAddress}, аутентификацию {attemptedOptions.Authentication}, " +
+                     $"{attemptedOptions.ClientAddress}, аутентификацию {(attemptedOptions.HighGmac is null ? attemptedOptions.Authentication.ToString() : "HighGMAC")}, " +
                      $"Conformance {attemptedOptions.Conformance} и Max PDU {attemptedOptions.MaxReceivePduSize} " +
                      "с настройками этого счётчика.");
         }
@@ -1070,7 +1126,7 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
         if (!byte.TryParse(AssociationVersion, NumberStyles.None, CultureInfo.InvariantCulture, out byte version))
             throw new ArgumentException("Выберите версию ассоциации.");
-        if (!Enum.TryParse<ClientAuthentication>(Authentication, out var auth))
+        if (!Enum.TryParse<ClientAuthentication>(IsHighGmac ? "None" : Authentication, out var auth))
             throw new ArgumentException("Выберите способ аутентификации.");
         if (!double.TryParse(ConnectTimeoutSeconds, NumberStyles.Float,
                 CultureInfo.InvariantCulture, out double connectTimeout) ||
@@ -1112,6 +1168,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             connectTimeout, idleTimeout, keepAliveInterval, maxPdu, conformance,
             IgnoreIdenticalObjectListEntries, limits, Transport, serial)
         {
+            HighGmac = IsHighGmac ? new HighGmacSettings(GmacAuthenticationKey, GmacBlockCipherKey,
+                GmacClientSystemTitle, GmacServerSystemTitle, GmacInitialCounter) : null,
             HdlcInformationFrameRetryCount = IsHdlc ? HdlcInformationFrameRetryCount : 0,
             HdlcParameters = hdlcParameters,
             HdlcAcknowledgementTimeoutSeconds = hdlcAcknowledgementTimeout,
@@ -1120,6 +1178,12 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             IgnoreInvokeIdValidation = IgnoreInvokeIdValidation
         };
         _ = options.CreateTransportFactory();
+        if (options.HighGmac is { } gmac)
+        {
+            _ = gmac.CreateProtocol(new EMCL.Protocol.Security.MemoryInvocationCounterStore(gmac.ParseInitialCounter()));
+            if ((conformance & DlmsConformance.Action) == 0)
+                throw new ArgumentException("Для HighGMAC нужен Action в Conformance.");
+        }
         return options;
     }
 

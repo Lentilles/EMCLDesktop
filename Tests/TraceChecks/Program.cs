@@ -22,6 +22,31 @@ string[] Tokens(DiagnosticTrace trace) => Lines(trace)
     .SelectMany(match => match.Groups[1].Value.Split(' ')).ToArray();
 string[] Hex(byte[] bytes) => bytes.Select(b => b.ToString("X2")).ToArray();
 
+// HighGMAC counters survive restarts and are reserved atomically across store instances.
+string counterDirectory = Path.Combine(Path.GetTempPath(), "emcldesktop-counters-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var firstStore = new PersistentInvocationCounterStore(counterDirectory, 10);
+    Check(firstStore.Reserve("tx:test") == 10, "Initial counter was not used");
+    var secondStore = new PersistentInvocationCounterStore(counterDirectory, 3);
+    Check(secondStore.Reserve("tx:test") == 11, "Counter was reused after reopening");
+    Check(new PersistentInvocationCounterStore(counterDirectory, 20).Reserve("tx:test") == 20,
+        "Manual minimum was not applied");
+    var reservations = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => secondStore.Reserve("tx:test"))));
+    Check(reservations.Distinct().Count() == 16 && reservations.Min() == 21 && reservations.Max() == 36,
+        "Concurrent reservations were not unique");
+    Check(firstStore.TryAccept("rx:test", 7) && !secondStore.TryAccept("rx:test", 7), "Replay was accepted");
+    Check(secondStore.TryAccept("rx:test", 8), "Next incoming counter was rejected");
+    var settings = new HighGmacSettings(new string('1', 32), new string('2', 32),
+        "4142434445464748", "494A4B4C4D4E4F50", "10");
+    _ = settings.CreateProtocol(new EMCL.Protocol.Security.MemoryInvocationCounterStore(settings.ParseInitialCounter()));
+    bool invalidKeyRejected = false;
+    try { _ = (settings with { AuthenticationKey = "00" }).CreateProtocol(firstStore); }
+    catch (ArgumentException) { invalidKeyRejected = true; }
+    Check(invalidKeyRejected, "Invalid HighGMAC key was accepted");
+}
+finally { if (Directory.Exists(counterDirectory)) Directory.Delete(counterDirectory, true); }
+
 // Include authentication-like, malformed and incomplete bytes: neither HEX mode filters them.
 byte[] tx = [0x60, 9, 0xAC, 7, 0x80, 5, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5];
 byte[] rx = [0xFF, 0xDB, 0xAA, 0x00, 0x7E];
@@ -227,6 +252,25 @@ Check(restored.HdlcInformationFrameRetryCount == 1 && restored.HdlcAcknowledgeme
 Check(!restored.UseFixedInvokeC1 && restored.Authentication == "High", "Disabled fixed 0xC1 setting did not round trip");
 Check(restored.UseHighPriority && restored.IgnoreInvokeIdValidation,
     "High request priority or Invoke ID compatibility setting did not round trip");
+var gmacVm = new MainViewModel
+{
+    Transport = "Serial", SerialPortName = "/dev/test-serial", Authentication = "HighGMAC",
+    GmacAuthenticationKey = new string('1', 32), GmacBlockCipherKey = new string('2', 32),
+    GmacServerSystemTitle = "494A4B4C4D4E4F50", GmacInitialCounter = "17"
+};
+Check(gmacVm.IsHighGmac && !gmacVm.HasPassword, "HighGMAC settings visibility");
+await using var gmacJson = new MemoryStream();
+await gmacVm.SaveConfigurationAsync(gmacJson);
+var gmacSnapshot = JsonNode.Parse(gmacJson.ToArray())!["association"]!;
+Check(gmacSnapshot["authentication"]!.GetValue<string>() == "HighGMAC" && gmacSnapshot["password"] is null,
+    "HighGMAC profile saved an incorrect authentication or unrelated password");
+gmacJson.Position = 0;
+var restoredGmac = new MainViewModel();
+await restoredGmac.LoadConfigurationAsync(gmacJson);
+Check(restoredGmac.IsHighGmac && restoredGmac.GmacInitialCounter == "17" &&
+      restoredGmac.GmacBlockCipherKey == gmacVm.GmacBlockCipherKey &&
+      restoredGmac.GmacServerSystemTitle == gmacVm.GmacServerSystemTitle,
+    "HighGMAC settings did not round trip: " + restoredGmac.Status);
 var savedAssociation = savedSerial["association"]!.AsObject();
 savedAssociation["useFixedInvokeC1"] = true;
 await restored.LoadConfigurationAsync(new MemoryStream(Encoding.UTF8.GetBytes(savedSerial.ToJsonString())));

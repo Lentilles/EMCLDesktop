@@ -184,6 +184,42 @@
                 </StackPanel>
             </Border>
 
+            <Border x:Name="HighGmacSection" Classes="settings-section" IsVisible="{Binding IsHighGmac}">
+                <StackPanel Spacing="16">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="HighGMAC" Classes="section-title" />
+                        <TextBlock Text="Ключи и параметры защищённой ассоциации" Classes="muted" FontSize="12" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="Ключ аутентификации, HEX" Classes="field-label" />
+                            <TextBox Text="{Binding GmacAuthenticationKey}" PasswordChar="●" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="Ключ шифрования, HEX" Classes="field-label" />
+                            <TextBox Text="{Binding GmacBlockCipherKey}" PasswordChar="●" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="При сохранении конфигурации в JSON ключи записываются без шифрования." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <StackPanel Spacing="5">
+                            <TextBlock Text="System Title клиента, HEX" Classes="field-label" />
+                            <TextBox Text="{Binding GmacClientSystemTitle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="System Title прибора, HEX" Classes="field-label" />
+                            <TextBox Text="{Binding GmacServerSystemTitle}" />
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="Начальный исходящий счётчик" Classes="field-label" />
+                        <TextBox Text="{Binding GmacInitialCounter}" Width="190" HorizontalAlignment="Left" />
+                        <TextBlock Text="Приложение использует большее из указанного и сохранённого значения. Счётчик прибора автоматически не считывается."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <Border x:Name="ExchangeSection" Classes="settings-section">
                 <StackPanel Spacing="16">
                     <StackPanel Spacing="3">
