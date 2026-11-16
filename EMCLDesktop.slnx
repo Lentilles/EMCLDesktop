@@ -1,15 +1,23 @@
 <Solution>
-  <Folder Name="/DirectoryProps/">
+  <Folder Name="/src/">
+    <Project Path="EMCLDesktop/EMCLDesktop.csproj" />
+    <Project Path="EMCLDesktop.Desktop/EMCLDesktop.Desktop.csproj" />
+    <Project Path="EMCLDesktop.Android/EMCLDesktop.Android.csproj">
+      <Deploy />
+    </Project>
+    <Project Path="EMCLDesktop.iOS/EMCLDesktop.iOS.csproj">
+      <Deploy />
+    </Project>
+    <Project Path="EMCLDesktop.Browser/EMCLDesktop.Browser.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="Tests/EMCLDesktop.Tests/EMCLDesktop.Tests.csproj" />
+  </Folder>
+  <Folder Name="/solution items/">
     <File Path=".gitignore" />
     <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
   </Folder>
-  <Project Path="EMCLDesktop.Android/EMCLDesktop.Android.csproj">
-    <Deploy />
-  </Project>
-  <Project Path="EMCLDesktop.Browser/EMCLDesktop.Browser.csproj" />
-  <Project Path="EMCLDesktop.Desktop/EMCLDesktop.Desktop.csproj" />
-  <Project Path="EMCLDesktop.iOS/EMCLDesktop.iOS.csproj">
-    <Deploy />
-  </Project>
-  <Project Path="EMCLDesktop/EMCLDesktop.csproj" />
 </Solution>

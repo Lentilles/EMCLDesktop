@@ -78,7 +78,7 @@ Existing ZIP, TAR.GZ, and DMG builds do not update themselves. To enable updates
 
 Each architecture has its own update channel. Releases contain complete update packages; prereleases and delta packages are not used. macOS Velopack builds are not signed with a Developer ID or notarized and may be blocked by Gatekeeper; see the macOS distribution notes below. When multiple application instances are open, installation is deferred rather than deliberately closing the other instances.
 
-The [Build and release](.github/workflows/release.yml) workflow runs on pushes, pull requests, and manual dispatches through Actions. For each of the six targets, it runs console checks, publishes a self-contained Release build, and packages it on a runner with the matching architecture. Regular builds are available as Actions artifacts for 14 days.
+The [Build and release](.github/workflows/release.yml) workflow runs on pushes, pull requests, and manual dispatches through Actions. For each of the six targets, it runs tests, publishes a self-contained Release build, and packages it on a runner with the matching architecture. Regular builds are available as Actions artifacts for 14 days.
 
 | Platform | Release package |
 | --- | --- |
@@ -190,7 +190,7 @@ The method card shows any returned value, a meter rejection code, or an unconfir
 
 ## Saving and loading
 
-**Save** writes connection settings and a catalog snapshot to JSON, including OBIS, classes, attributes, methods, access rights, and text values already read. **Load** opens the snapshot without connecting to a meter. The legacy `EMCLDirector` format identifier, both `EMCL.Examples` formats, and older TCP configurations are supported.
+**Save** writes connection settings and a catalog snapshot to JSON, including OBIS, classes, attributes, methods, access rights, and text values already read. **Load** opens the snapshot without connecting to a meter. The legacy `EMCLDirector` format identifier, both `EMCL.Examples` formats, and older TCP configurations are supported. Missing sections and connection details retain existing values where possible, and known fields can be loaded from a different schema version. Review the status and connection settings before connecting: unsupported formats or invalid known values can still prevent import, and unrecognized fields are not retained when saving again.
 
 With UTF-8 or HEX passwords, the password is stored in JSON without encryption. `Environment` mode stores the environment variable name instead of the secret's value.
 
@@ -237,10 +237,10 @@ Both HEX modes show the raw exchange without masking, including transmitted pass
 
 ## Checks
 
-The repository includes a console check suite for tracing, transport idle timeouts, configurations, view models, profiles, attribute writes, and the packet inspector:
+The repository includes a test project for tracing, transport idle timeouts, configurations, view models, profiles, attribute writes, and the packet inspector:
 
 ```sh
-dotnet run --project Tests/TraceChecks/TraceChecks.csproj
+dotnet test Tests/EMCLDesktop.Tests/EMCLDesktop.Tests.csproj
 ```
 
 The checks use test data and fake transports; no physical meter is required.
@@ -251,7 +251,7 @@ The checks use test data and fake transports; no physical meter is required.
 | --- | --- |
 | `EMCLDesktop` | Shared Avalonia views, view models, and services for connections, configuration, and packet analysis |
 | `EMCLDesktop.Desktop` | Entry point for Windows, Linux, and macOS |
-| `Tests/TraceChecks` | Console checks |
+| `Tests/EMCLDesktop.Tests` | Automated tests |
 | `EMCLDesktop.Android`, `EMCLDesktop.iOS`, `EMCLDesktop.Browser` | Platform projects from the original template |
 
 ## License

@@ -401,11 +401,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         {
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: operation.Token);
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new FormatException("Конфигурация должна быть объектом JSON.");
             if (root.TryGetProperty("format", out var format) &&
                 format.GetString() is not (SavedConfiguration.Format or SavedConfiguration.LegacyFormat))
                 throw new FormatException("Неизвестный формат конфигурации.");
-            if (root.ValueKind != JsonValueKind.Object)
-                throw new FormatException("Конфигурация должна быть объектом JSON.");
             var loadWarnings = new List<string>();
             if (root.TryGetProperty("schemaVersion", out var schemaVersion) &&
                 schemaVersion.GetInt32() != SavedConfiguration.Version)
@@ -421,8 +421,8 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 return value;
             }
             MeterObjectViewModel[]? savedObjects = null;
-            bool preserveCatalog = false;
-            if (root.TryGetProperty("catalog", out var catalogElement))
+            bool preserveCatalog = !root.TryGetProperty("catalog", out var catalogElement);
+            if (!preserveCatalog)
             {
                 try
                 {
@@ -452,9 +452,39 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             var association = ObjectOrEmpty(root, "association");
             if (connectionSettings.ValueKind != JsonValueKind.Object || framingSettings.ValueKind != JsonValueKind.Object)
                 throw new FormatException("Раздел подключения должен быть объектом JSON.");
-            if (connectionSettings.GetRawText() == "{}" || association.GetRawText() == "{}")
+            bool partialAssociation = !association.TryGetProperty("version", out _) ||
+                !association.TryGetProperty("logicalName", out _) || !association.TryGetProperty("authentication", out _);
+            if (!connectionSettings.EnumerateObject().Any() || !framingSettings.EnumerateObject().Any() || partialAssociation)
                 loadWarnings.Add("часть настроек отсутствует; проверьте параметры перед подключением");
-            var importedTransport = legacy ? "TCP" : GetString(connectionSettings, "kind", "Tcp") switch
+            var knownRootFields = new HashSet<string>(StringComparer.Ordinal)
+                { "format", "schemaVersion", "connection", "channel", "association", "limits", "catalog" };
+            var knownAssociationFields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "version", "logicalName", "authentication", "password", "passwordHex", "passwordEnvironmentVariable",
+                "gmacAuthenticationKey", "gmacBlockCipherKey", "gmacClientSystemTitle", "gmacServerSystemTitle", "gmacInitialCounter",
+                "useFixedInvokeC1", "useHighPriority", "ignoreInvokeIdValidation", "conformance", "requestTimeoutSeconds",
+                "keepAliveIntervalSeconds", "maxReceivePduSize", "ignoreIdenticalObjectListEntries"
+            };
+            var knownConnectionFields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "kind", "host", "tcpPort", "portName", "baudRate", "dataBits", "parity", "stopBits", "handshake",
+                "dtrEnable", "rtsEnable", "connectTimeoutSeconds", "transport", "clientWrapperPort", "serverWrapperPort",
+                "hdlcClientAddress", "hdlcServerLogicalAddress", "hdlcServerPhysicalAddress", "hdlcExtendedAddress",
+                "hdlcLinkParameters", "informationFrameRetryCount", "acknowledgementTimeoutSeconds"
+            };
+            var knownFramingFields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "kind", "clientAddress", "serverLogicalAddress", "serverPhysicalAddress", "extendedAddress",
+                "clientPort", "serverPort", "hdlcLinkParameters", "informationFrameRetryCount", "acknowledgementTimeoutSeconds"
+            };
+            if (root.EnumerateObject().Any(p => !knownRootFields.Contains(p.Name)) ||
+                association.EnumerateObject().Any(p => !knownAssociationFields.Contains(p.Name)) ||
+                connectionSettings.EnumerateObject().Any(p => !knownConnectionFields.Contains(p.Name)) ||
+                (!legacy && framingSettings.EnumerateObject().Any(p => !knownFramingFields.Contains(p.Name))))
+                loadWarnings.Add("незнакомые поля будут потеряны при повторном сохранении");
+            string fallbackTransport = connectionSettings.TryGetProperty("host", out _) || connectionSettings.TryGetProperty("tcpPort", out _)
+                ? "Tcp" : connectionSettings.TryGetProperty("portName", out _) ? "Serial" : Transport == "Serial" ? "Serial" : "Tcp";
+            var importedTransport = !connectionSettings.EnumerateObject().Any() ? Transport : legacy ? "TCP" : GetString(connectionSettings, "kind", fallbackTransport) switch
             {
                 "Tcp" => "TCP",
                 "Serial" => "Serial",
@@ -467,18 +497,19 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             {
                 importedSerial = new SerialPortSettings(
                     GetString(connectionSettings, "portName", SerialPortName),
-                    GetInt(connectionSettings, "baudRate", 9600),
-                    GetInt(connectionSettings, "dataBits", 8),
-                    Enum.Parse<Parity>(GetString(connectionSettings, "parity", "None"), true),
-                    Enum.Parse<StopBits>(GetString(connectionSettings, "stopBits", "One"), true),
-                    Enum.Parse<Handshake>(GetString(connectionSettings, "handshake", "None"), true),
-                    GetBool(connectionSettings, "dtrEnable", false),
-                    GetBool(connectionSettings, "rtsEnable", false));
+                    GetInt(connectionSettings, "baudRate", int.TryParse(SerialBaudRate, out var previousBaud) ? previousBaud : 9600),
+                    GetInt(connectionSettings, "dataBits", SerialDataBits),
+                    Enum.Parse<Parity>(GetString(connectionSettings, "parity", SerialParity.ToString()), true),
+                    Enum.Parse<StopBits>(GetString(connectionSettings, "stopBits", SerialStopBits.ToString()), true),
+                    Enum.Parse<Handshake>(GetString(connectionSettings, "handshake", SerialHandshake.ToString()), true),
+                    GetBool(connectionSettings, "dtrEnable", SerialDtrEnable),
+                    GetBool(connectionSettings, "rtsEnable", SerialRtsEnable));
                 if (connectionSettings.TryGetProperty("portName", out var importedPortName) &&
                     importedPortName.ValueKind != JsonValueKind.Null && !string.IsNullOrWhiteSpace(importedSerial.PortName))
                     importedSerial.Validate();
             }
-            var importedFraming = legacy
+            bool partialFraming = !legacy && !framingSettings.TryGetProperty("kind", out _);
+            var importedFraming = !framingSettings.EnumerateObject().Any() || partialFraming ? Framing : legacy
                 ? (GetString(framingSettings, "transport", "WrapperTcp") == "HdlcTcp" ? "HDLC" : "Wrapper")
                 : (GetString(framingSettings, "kind", "Wrapper") == "Hdlc" ? "HDLC" : "Wrapper");
             string importedClient = importedFraming == "HDLC"
@@ -529,10 +560,13 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             bool importedUseHighPriority = GetBool(association, "useHighPriority", false);
             bool importedIgnoreInvokeIdValidation = GetBool(association, "ignoreInvokeIdValidation", false);
 
-            string importedPassword = "";
-            string importedPasswordFormat = "UTF-8";
+            string importedPassword = Password;
+            string importedPasswordFormat = PasswordFormat;
             if (GetNullableString(association, "password") is { } textPassword)
+            {
                 importedPassword = textPassword;
+                importedPasswordFormat = "UTF-8";
+            }
             else if (GetNullableString(association, "passwordHex") is { } hexPassword)
             {
                 importedPassword = hexPassword;
@@ -556,66 +590,87 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 VisibleGroups.Clear();
                 VisibleObjectCount = 0;
             }
-            Transport = importedTransport;
-            if (importedSerial is not null)
+            if (connectionSettings.EnumerateObject().Any())
             {
-                SerialPortName = importedSerial.PortName;
-                SerialBaudRate = importedSerial.BaudRate.ToString(CultureInfo.InvariantCulture);
-                SerialDataBits = importedSerial.DataBits;
-                SerialParity = importedSerial.Parity;
-                SerialStopBits = importedSerial.StopBits;
-                SerialHandshake = importedSerial.Handshake;
-                SerialDtrEnable = importedSerial.DtrEnable;
-                SerialRtsEnable = importedSerial.RtsEnable;
+                Transport = importedTransport;
+                if (importedSerial is not null)
+                {
+                    SerialPortName = importedSerial.PortName;
+                    SerialBaudRate = importedSerial.BaudRate.ToString(CultureInfo.InvariantCulture);
+                    SerialDataBits = importedSerial.DataBits;
+                    SerialParity = importedSerial.Parity;
+                    SerialStopBits = importedSerial.StopBits;
+                    SerialHandshake = importedSerial.Handshake;
+                    SerialDtrEnable = importedSerial.DtrEnable;
+                    SerialRtsEnable = importedSerial.RtsEnable;
+                }
+                else
+                {
+                    Host = importedHost;
+                    TcpPort = importedPort.ToString(CultureInfo.InvariantCulture);
+                }
             }
-            else
+            if (framingSettings.ValueKind == JsonValueKind.Object && framingSettings.EnumerateObject().Any())
             {
-                Host = importedHost;
-                TcpPort = importedPort.ToString(CultureInfo.InvariantCulture);
+                Framing = importedFraming;
+                if (!partialFraming || framingSettings.TryGetProperty(importedFraming == "HDLC" ? "clientAddress" : "clientPort", out _))
+                    ClientAddress = importedClient;
+                if (!partialFraming || framingSettings.TryGetProperty(importedFraming == "HDLC" ? "serverLogicalAddress" : "serverPort", out _))
+                    ServerAddress = importedServer;
+                if (!partialFraming || framingSettings.TryGetProperty("serverPhysicalAddress", out _))
+                    ServerPhysicalAddress = importedPhysical;
+                if (!partialFraming || framingSettings.TryGetProperty("extendedAddress", out _))
+                    ExtendedHdlcAddress = importedExtended;
+                if (!partialFraming || framingSettings.TryGetProperty("hdlcLinkParameters", out _))
+                {
+                    UseHdlcLinkParameters = importedHdlcParameters is not null;
+                    // Load both directions independently before restoring the editing link.
+                    AreHdlcSizesLinked = false;
+                    HdlcMaxTxBytes = (importedHdlcParameters?.MaximumTransmitInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
+                    HdlcMaxRxBytes = (importedHdlcParameters?.MaximumReceiveInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
+                    AreHdlcSizesLinked = HdlcMaxTxBytes == HdlcMaxRxBytes;
+                }
+                if (!partialFraming || framingSettings.TryGetProperty("informationFrameRetryCount", out _))
+                    HdlcInformationFrameRetryCount = importedHdlcRetryCount;
+                if (!partialFraming || framingSettings.TryGetProperty("acknowledgementTimeoutSeconds", out _))
+                    HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
             }
-            if (framingSettings.ValueKind == JsonValueKind.Object && framingSettings.GetRawText() != "{}")
+            if (connectionSettings.TryGetProperty("connectTimeoutSeconds", out _))
+                ConnectTimeoutSeconds = GetDouble(connectionSettings, "connectTimeoutSeconds", 10)
+                    .ToString(CultureInfo.InvariantCulture);
+            if (association.EnumerateObject().Any())
             {
-            Framing = importedFraming;
-            ClientAddress = importedClient;
-            ServerAddress = importedServer;
-            ServerPhysicalAddress = importedPhysical;
-            ExtendedHdlcAddress = importedExtended;
-            UseHdlcLinkParameters = importedHdlcParameters is not null;
-            // Load both directions independently before restoring the editing link.
-            AreHdlcSizesLinked = false;
-            HdlcMaxTxBytes = (importedHdlcParameters?.MaximumTransmitInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
-            HdlcMaxRxBytes = (importedHdlcParameters?.MaximumReceiveInformationBytes ?? HdlcNegotiation.MaximumInformationBytes).ToString(CultureInfo.InvariantCulture);
-            AreHdlcSizesLinked = HdlcMaxTxBytes == HdlcMaxRxBytes;
-            HdlcInformationFrameRetryCount = importedHdlcRetryCount;
-            HdlcAcknowledgementTimeoutSeconds = importedHdlcAcknowledgementTimeout.ToString(CultureInfo.InvariantCulture);
+                AssociationVersion = GetInt(association, "version", int.TryParse(AssociationVersion, out var previousVersion) ? previousVersion : 1).ToString(CultureInfo.InvariantCulture);
+                AssociationObis = GetString(association, "logicalName", AssociationObis);
+                Authentication = GetString(association, "authentication", Authentication);
+                GmacAuthenticationKey = GetString(association, "gmacAuthenticationKey", GmacAuthenticationKey);
+                GmacBlockCipherKey = GetString(association, "gmacBlockCipherKey", GmacBlockCipherKey);
+                GmacClientSystemTitle = GetString(association, "gmacClientSystemTitle", GmacClientSystemTitle);
+                GmacServerSystemTitle = GetString(association, "gmacServerSystemTitle", GmacServerSystemTitle);
+                GmacInitialCounter = GetString(association, "gmacInitialCounter", GmacInitialCounter);
+                if (!partialAssociation || association.TryGetProperty("useFixedInvokeC1", out _))
+                    UseFixedInvokeC1 = importedUseFixedInvokeC1;
+                if (!partialAssociation || association.TryGetProperty("useHighPriority", out _))
+                    UseHighPriority = importedUseHighPriority;
+                if (!partialAssociation || association.TryGetProperty("ignoreInvokeIdValidation", out _))
+                    IgnoreInvokeIdValidation = importedIgnoreInvokeIdValidation;
+                Password = importedPassword;
+                PasswordFormat = importedPasswordFormat;
+                if (!partialAssociation || association.TryGetProperty("requestTimeoutSeconds", out _))
+                    IdleTimeoutSeconds = importedIdleTimeout.ToString(CultureInfo.InvariantCulture);
+                if (!partialAssociation || association.TryGetProperty("keepAliveIntervalSeconds", out _))
+                    KeepAliveIntervalSeconds = GetDouble(association, "keepAliveIntervalSeconds", 20)
+                        .ToString(CultureInfo.InvariantCulture);
+                if (!partialAssociation || association.TryGetProperty("maxReceivePduSize", out _))
+                    MaxReceivePduSize = GetInt(association, "maxReceivePduSize", 65535)
+                        .ToString(CultureInfo.InvariantCulture);
+                if (!partialAssociation || association.TryGetProperty("conformance", out _))
+                    foreach (var option in ConformanceOptions)
+                        option.IsSelected = (importedConformance & option.Flag) == option.Flag;
+                if (!partialAssociation || association.TryGetProperty("ignoreIdenticalObjectListEntries", out _))
+                    IgnoreIdenticalObjectListEntries = GetBool(association, "ignoreIdenticalObjectListEntries", false);
             }
-            if (association.GetRawText() != "{}")
-            {
-            AssociationVersion = GetInt(association, "version", int.TryParse(AssociationVersion, out var previousVersion) ? previousVersion : 1).ToString(CultureInfo.InvariantCulture);
-            AssociationObis = GetString(association, "logicalName", AssociationObis);
-            Authentication = GetString(association, "authentication", Authentication);
-            GmacAuthenticationKey = GetString(association, "gmacAuthenticationKey", "");
-            GmacBlockCipherKey = GetString(association, "gmacBlockCipherKey", "");
-            GmacClientSystemTitle = GetString(association, "gmacClientSystemTitle", "4142434445464748");
-            GmacServerSystemTitle = GetString(association, "gmacServerSystemTitle", "");
-            GmacInitialCounter = GetString(association, "gmacInitialCounter", "");
-            UseFixedInvokeC1 = importedUseFixedInvokeC1;
-            UseHighPriority = importedUseHighPriority;
-            IgnoreInvokeIdValidation = importedIgnoreInvokeIdValidation;
-            Password = importedPassword;
-            PasswordFormat = importedPasswordFormat;
-            ConnectTimeoutSeconds = GetDouble(connectionSettings, "connectTimeoutSeconds", 10)
-                .ToString(CultureInfo.InvariantCulture);
-            IdleTimeoutSeconds = importedIdleTimeout.ToString(CultureInfo.InvariantCulture);
-            KeepAliveIntervalSeconds = GetDouble(association, "keepAliveIntervalSeconds", 20)
-                .ToString(CultureInfo.InvariantCulture);
-            MaxReceivePduSize = GetInt(association, "maxReceivePduSize", 65535)
-                .ToString(CultureInfo.InvariantCulture);
-            foreach (var option in ConformanceOptions)
-                option.IsSelected = (importedConformance & option.Flag) == option.Flag;
-            IgnoreIdenticalObjectListEntries = GetBool(association, "ignoreIdenticalObjectListEntries", false);
-            }
-            limits = importedLimits;
+            if (root.TryGetProperty("limits", out _)) limits = importedLimits;
             if (savedObjects != null)
             {
                 foreach (var obj in savedObjects) Objects.Add(obj);
