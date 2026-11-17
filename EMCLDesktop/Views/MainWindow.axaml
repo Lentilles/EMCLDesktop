@@ -13,10 +13,13 @@
     <Grid RowDefinitions="Auto,*">
         <Border x:Name="UpdateNotice" IsVisible="False" Background="#183C50"
                 Padding="16,10" BorderBrush="#39738B" BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                <TextBlock Text="Новая версия загружена. Закройте и снова откройте приложение, чтобы установить обновление."
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="16">
+                <TextBlock Text="Новая версия загружена. Приложение перезапустится и восстановит подключение."
                            Foreground="#F4F7FC" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="Понятно" Click="DismissUpdateNoticeClick"
+                <Button x:Name="ApplyUpdateButton" Grid.Column="1" IsEnabled="{ReflectionBinding CanEditConfiguration}" Content="Обновить" Click="ApplyUpdateClick"
+                        VerticalAlignment="Center" />
+                <Button Grid.Column="2" Content="✕" Click="DismissUpdateNoticeClick"
+                        ToolTip.Tip="Скрыть уведомление" AutomationProperties.Name="Скрыть уведомление"
                         VerticalAlignment="Center" />
             </Grid>
         </Border>

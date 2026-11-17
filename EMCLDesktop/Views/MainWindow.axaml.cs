@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -11,6 +14,7 @@ public partial class MainWindow : Window
     private bool closingAfterCleanup;
     private bool cleanupStarted;
     private bool updateNoticeDismissed;
+    private bool updateInProgress;
 
     public MainWindow()
     {
@@ -33,11 +37,58 @@ public partial class MainWindow : Window
         UpdateNotice.IsVisible = false;
     }
 
+    private async void ApplyUpdateClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || vm.IsBusy || vm.IsReading || updateInProgress) return;
+        updateInProgress = true;
+        string? path = null;
+        bool wasConnected = vm.IsConnected;
+        try
+        {
+            path = Path.Combine(Path.GetTempPath(), $"emcl-update-{Guid.NewGuid():N}.json");
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            await using (var stream = new FileStream(path, options))
+                await vm.SaveConfigurationAsync(stream);
+            if (wasConnected) await vm.DisconnectForUpdateAsync();
+            DesktopUpdates.Current.ApplyAndRestart(["--restore-update", path, wasConnected ? "connected" : "disconnected"]);
+            path = null; // The restarted process consumes the snapshot.
+            updateInProgress = false;
+            Close();
+        }
+        catch (Exception error)
+        {
+            if (path is not null) { try { File.Delete(path); } catch (IOException) { } }
+            if (wasConnected && !vm.IsConnected) await vm.ReconnectAfterUpdateAsync();
+            vm.Status = $"Не удалось запустить обновление: {error.Message}";
+            updateInProgress = false;
+        }
+    }
+
+    public async Task RestoreAfterUpdateAsync(string path, bool reconnect)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var fullPath = Path.GetFullPath(path);
+        if (Path.GetDirectoryName(fullPath) != Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())) ||
+            !Path.GetFileName(fullPath).StartsWith("emcl-update-", StringComparison.Ordinal) ||
+            !Path.GetFileName(fullPath).EndsWith(".json", StringComparison.Ordinal)) return;
+        try
+        {
+            bool loaded;
+            await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+                loaded = await vm.LoadConfigurationAsync(stream);
+            if (loaded && reconnect) await vm.ReconnectAfterUpdateAsync();
+        }
+        catch (Exception error) { vm.Status = $"Не удалось восстановить состояние после обновления: {error.Message}"; }
+        finally { try { File.Delete(path); } catch (IOException) { } }
+    }
+
     public void OpenConnectionSettings() => MainContent.OpenConnectionSettings();
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         base.OnClosing(e);
+        if (updateInProgress) { e.Cancel = true; return; }
         if (e.Cancel || closingAfterCleanup || DataContext is not MainViewModel viewModel)
             return;
 
@@ -49,11 +100,9 @@ public partial class MainWindow : Window
 
     private async System.Threading.Tasks.Task CloseAfterCleanupAsync(MainViewModel viewModel)
     {
-        var cleanedUp = false;
         try
         {
             await viewModel.DisposeAsync();
-            cleanedUp = true;
         }
         catch (System.Exception)
         {
@@ -61,8 +110,6 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (cleanedUp)
-                await DesktopUpdates.Current.PrepareForExitAsync();
             closingAfterCleanup = true;
             Close();
         }

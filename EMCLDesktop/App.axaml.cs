@@ -27,7 +27,13 @@ public partial class App : Application
             {
                 DataContext = new MainViewModel()
             };
-            desktop.MainWindow.Opened += (_, _) => DesktopUpdates.Current.Start();
+            desktop.MainWindow.Opened += async (_, _) =>
+            {
+                DesktopUpdates.Current.Start();
+                var args = desktop.Args;
+                if (args is ["--restore-update", var path, var state] && desktop.MainWindow is MainWindow window)
+                    await window.RestoreAfterUpdateAsync(path, state == "connected");
+            };
         }
         else if (ApplicationLifetime is IActivityApplicationLifetime singleViewFactoryApplicationLifetime)
         {

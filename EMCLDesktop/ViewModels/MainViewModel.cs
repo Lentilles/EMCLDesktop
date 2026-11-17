@@ -392,9 +392,9 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     partial void OnSearchTextChanged(string value) => ApplyObjectFilter();
     partial void OnUseRegularExpressionChanged(bool value) => ApplyObjectFilter();
 
-    public async Task LoadConfigurationAsync(Stream stream)
+    public async Task<bool> LoadConfigurationAsync(Stream stream)
     {
-        if (IsBusy || IsReading) return;
+        if (IsBusy || IsReading) return false;
         using var operation = BeginOperation("загрузка конфигурации");
         IsBusy = true;
         try
@@ -683,14 +683,17 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             }
             if (loadWarnings.Count > 0)
                 Status += " " + string.Join("; ", loadWarnings) + ".";
+            return true;
         }
         catch (Exception) when (operation.IsCancellationRequested)
         {
             Status = "Загрузка конфигурации отменена.";
+            return false;
         }
         catch (Exception error)
         {
             ReportError($"Не удалось загрузить конфигурацию: {error.Message}");
+            return false;
         }
         finally
         {
@@ -953,6 +956,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
     }
 
     [RelayCommand]
+    public Task ReconnectAfterUpdateAsync() => ConnectAsync();
+
+    public Task DisconnectForUpdateAsync() => DisconnectAsync();
+
     private async Task ConnectAsync()
     {
         if (Volatile.Read(ref disposed) != 0 || IsBusy || IsReading) return;

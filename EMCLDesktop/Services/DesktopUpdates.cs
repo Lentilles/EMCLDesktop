@@ -9,7 +9,7 @@ public interface IDesktopUpdates
     bool IsUpdateReady { get; }
     event EventHandler? StatusChanged;
     void Start();
-    Task PrepareForExitAsync();
+    void ApplyAndRestart(string[] restartArgs);
 }
 
 public static class DesktopUpdates
@@ -22,6 +22,6 @@ public static class DesktopUpdates
         public bool IsUpdateReady => false;
         public event EventHandler? StatusChanged { add { } remove { } }
         public void Start() { }
-        public Task PrepareForExitAsync() => Task.CompletedTask;
+        public void ApplyAndRestart(string[] restartArgs) => throw new InvalidOperationException("Обновление недоступно.");
     }
 }

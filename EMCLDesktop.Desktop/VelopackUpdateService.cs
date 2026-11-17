@@ -43,7 +43,7 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
             if (manager.UpdatePendingRestart is not null)
             {
                 isUpdateReady = true;
-                SetStatus("Обновление загружено и будет установлено при закрытии приложения.");
+                SetStatus("Обновление загружено. Нажмите «Обновить» в главном окне.");
                 return;
             }
 
@@ -60,7 +60,7 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
             await manager.DownloadUpdatesAsync(update, cancelToken: stopping.Token);
             if (stopping.IsCancellationRequested) return;
             isUpdateReady = true;
-            SetStatus("Обновление загружено и будет установлено при закрытии приложения.");
+            SetStatus("Обновление загружено. Нажмите «Обновить» в главном окне.");
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested) { }
         catch (Exception error)
@@ -70,32 +70,21 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
         }
     }
 
-    public async Task PrepareForExitAsync()
+    public void ApplyAndRestart(string[] restartArgs)
     {
-        stopping.Cancel();
-        // A check may be waiting for the network and has no cancellation API. Never delay exit for it.
-        if (check is { IsCompleted: false })
-            await Task.WhenAny(check, Task.Delay(TimeSpan.FromSeconds(2)));
+        if (!isUpdateReady || manager?.UpdatePendingRestart is not { } pending)
+            throw new InvalidOperationException("Загруженное обновление не найдено.");
+        using var current = Process.GetCurrentProcess();
+        var processes = Process.GetProcessesByName(current.ProcessName);
         try
         {
-            if (check is { IsCompleted: false } || manager?.UpdatePendingRestart is not { } pending)
-                return;
-            using var current = Process.GetCurrentProcess();
-            var processes = Process.GetProcessesByName(current.ProcessName);
-            try
-            {
-                // Never ask the updater to replace files while another instance is running.
-                if (processes.Any(process => process.Id != current.Id)) return;
-            }
-            finally
-            {
-                foreach (var process in processes) process.Dispose();
-            }
-            manager.WaitExitThenApplyUpdates(pending, silent: true, restart: false);
+            if (processes.Any(process => process.Id != current.Id))
+                throw new InvalidOperationException("Закройте другие экземпляры приложения и повторите попытку.");
         }
-        catch (Exception error)
+        finally
         {
-            Trace.WriteLine($"Update scheduling failed: {error}");
+            foreach (var process in processes) process.Dispose();
         }
+        manager.WaitExitThenApplyUpdates(pending, silent: true, restart: true, restartArgs: restartArgs);
     }
 }
