@@ -24,7 +24,8 @@ for rid in rids:
                 and asset.get("Type") == "Full" and asset.get("Version") == version]
     if len(matching) != 1:
         raise SystemExit(f"Feed for {rid} does not reference {full.name}")
-    full_name = f"EMCLDesktop-Update-{rid}.nupkg"
+    # Keep the version in the filename so releases do not share a cached package.
+    full_name = full.name
     installer_name = f"EMCLDesktop-Install-{rid}{extension}"
     for name in (full_name, feed.name, installer_name):
         if name in collected:
@@ -32,6 +33,5 @@ for rid in rids:
         collected.add(name)
     shutil.copy2(full, target / full_name)
     shutil.copy2(installers[0], target / installer_name)
-    matching[0]["FileName"] = full_name
     data["Assets"] = matching
     (target / feed.name).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
