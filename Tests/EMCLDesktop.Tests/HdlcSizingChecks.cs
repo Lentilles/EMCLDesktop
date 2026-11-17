@@ -146,7 +146,7 @@ internal static class HdlcSizingChecks
             };
             var server = ServeInformationFrameAsync(listener, explicitSizes ? new(1024, 512) : null,
                 peerSize, responseSize, deadline.Token);
-            await connectionVm.ConnectCommand.ExecuteAsync(null).WaitAsync(deadline.Token);
+            await connectionVm.ToggleConnectionCommand.ExecuteAsync(null).WaitAsync(deadline.Token);
             await server;
             Check(connectionVm.HasStatusError && connectionVm.Status.Contains("больше согласованного MAX RX") &&
                 connectionVm.Status.Contains($"{responseSize} bytes") && connectionVm.Status.Contains("128 bytes") &&

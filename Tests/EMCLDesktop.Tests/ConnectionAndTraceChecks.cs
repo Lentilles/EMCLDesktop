@@ -179,7 +179,7 @@ internal static class ConnectionAndTraceChecks
             if (vm.IsConnecting) connectingButtonDisabled |= !vm.ToggleConnectionCommand.CanExecute(null);
         }
         vm.PropertyChanged += ObserveConnectionState;
-        await vm.ConnectCommand.ExecuteAsync(null);
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);
         vm.PropertyChanged -= ObserveConnectionState;
         vm.TcpPort = validPort;
         Check(connectionStates.Contains("Подключение…") && connectingButtonDisabled && !vm.IsConnecting && !vm.IsBusy &&
