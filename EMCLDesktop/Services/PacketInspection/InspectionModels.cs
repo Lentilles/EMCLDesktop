@@ -26,6 +26,9 @@ public sealed record InspectionTarget(ushort ClassId, string Obis, sbyte Index, 
 public sealed record InspectedPacket(long Id, string Direction, string Timestamp, string Framing,
     byte[] Bytes, string Origin, string SourceText)
 {
+    internal const string AssembledHdlcFraming = "Собранный HDLC APDU";
+    internal const string AssembledValueFraming = "Собранное DLMS-значение";
+
     public string Kind { get; init; } = "Неизвестные данные";
     public string Diagnostic { get; init; } = "";
     public bool HasError { get; init; }
@@ -35,6 +38,7 @@ public sealed record InspectedPacket(long Id, string Direction, string Timestamp
     public DlmsValue? DataValue { get; init; }
     public string ValueText { get; init; } = "";
     public IReadOnlyList<long> RelatedPacketIds { get; init; } = [];
+    internal IReadOnlyList<long> AssemblySourcePacketIds { get; init; } = [];
     public string Summary => $"№ {Id} · {Timestamp} · {Direction} · {Kind}";
     public string Details => Target is { } target ? target.Description : Diagnostic;
 }

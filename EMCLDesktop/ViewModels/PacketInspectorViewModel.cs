@@ -10,14 +10,29 @@ namespace EMCLDesktop.ViewModels;
 public sealed partial class PacketItemViewModel(InspectedPacket packet) : ObservableObject
 {
     public InspectedPacket Packet { get; private set; } = packet;
-    public string Summary => Packet.Summary;
+    private string? AssemblyTitle => Packet.Framing switch
+    {
+        InspectedPacket.AssembledHdlcFraming => "Полный PDU",
+        InspectedPacket.AssembledValueFraming => InspectedPacket.AssembledValueFraming,
+        _ => null
+    };
+    public string Summary
+    {
+        get
+        {
+            if (AssemblyTitle is not { } title) return Packet.Summary;
+            return Packet.Timestamp.Length > 0 ? $"№ {Packet.Id} · {Packet.Timestamp} · {title}" : $"№ {Packet.Id} · {title}";
+        }
+    }
     public string Details => Packet.Details;
+    public bool IsAssembled => AssemblyTitle is not null;
     public bool HasError => Packet.HasError;
     public bool IsIncomplete => Packet.IsIncomplete;
     public void Update(InspectedPacket value)
     {
         Packet = value;
         OnPropertyChanged(nameof(Summary)); OnPropertyChanged(nameof(Details));
+        OnPropertyChanged(nameof(IsAssembled));
         OnPropertyChanged(nameof(HasError)); OnPropertyChanged(nameof(IsIncomplete));
     }
 }
@@ -69,6 +84,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     private readonly Dictionary<long, PacketItemViewModel> livePacketIndex = [];
     private readonly PacketCollection livePackets = [];
     private readonly PacketCollection textPackets = [];
+    private PacketAssemblyLayout liveAssemblyLayout = PacketAssemblyLayout.Empty;
+    private PacketAssemblyLayout textAssemblyLayout = PacketAssemblyLayout.Empty;
     private readonly DispatcherTimer timer;
     private readonly CancellationTokenSource shutdown = new();
     private readonly CancellationToken stopToken;
@@ -92,9 +109,10 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     [ObservableProperty] public partial bool IsInputExpanded { get; set; } = true;
     [ObservableProperty] public partial string InputText { get; set; } = "";
     [ObservableProperty] public partial string AnalysisStatus { get; set; } = "";
-    [ObservableProperty] public partial ObservableCollection<PacketItemViewModel> Packets { get; set; }
     [ObservableProperty] public partial PacketItemViewModel? SelectedPacket { get; set; }
     [ObservableProperty] public partial InspectorFieldViewModel? SelectedField { get; set; }
+    public ObservableCollection<PacketItemViewModel> Packets => IsLive ? livePackets : textPackets;
+    public PacketAssemblyLayout AssemblyLayout => IsLive ? liveAssemblyLayout : textAssemblyLayout;
     public ObservableCollection<InspectorFieldViewModel> Fields { get; } = [];
     public ObservableCollection<InspectorByteRow> ByteRows { get; } = [];
     public ObservableCollection<RelatedPacketViewModel> RelatedPackets { get; } = [];
@@ -124,7 +142,6 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     {
         this.trace = trace;
         stopToken = shutdown.Token;
-        Packets = livePackets;
         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         timer.Tick += OnTimerTick;
         trace.Changed += OnTraceChanged;
@@ -147,7 +164,6 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     partial void OnSourceIndexChanged(int value)
     {
         OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(IsText));
-        Packets = IsLive ? livePackets : textPackets;
         AnalysisStatus = IsLive ? liveStatus : textStatus;
         SelectedPacket = selections.TryGetValue(value, out var selection)
             ? Packets.FirstOrDefault(p => p.Packet.Id == selection.Id) : Packets.FirstOrDefault();
@@ -157,6 +173,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             bytePage = Math.Clamp(selection.Page, 0, Math.Max(0, ((SelectedPacket?.Packet.Bytes.Length ?? 0) - 1) / BytesPerPage));
             BuildBytePage();
         }
+        OnPropertyChanged(nameof(Packets));
+        OnPropertyChanged(nameof(AssemblyLayout));
         OnPropertyChanged(nameof(HasPackets));
         if (IsLive && IsActive) _ = RefreshLiveAsync();
     }
@@ -196,11 +214,12 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             var result = await Task.Run(() =>
             {
                 var packets = PacketAnalyzer.AnalyzeText(input, out int ignored, out long total, analysis.Token, packetLimit);
-                return (Packets: packets, Ignored: ignored, Total: total);
+                return (Packets: packets, Ignored: ignored, Total: total, AssemblyLayout: PacketAssemblyLayout.Create(packets));
             }, analysis.Token);
             analysis.Token.ThrowIfCancellationRequested();
             if (disposed || version != textVersion || packetLimit != PacketLimit) return;
             selections.Remove(1);
+            textAssemblyLayout = result.AssemblyLayout;
             textPackets.ReplaceAll(result.Packets.Select(packet => new PacketItemViewModel(packet)));
             if (result.Packets.Count > 0) IsInputExpanded = false;
             textStatus = result.Packets.Count == 0 ? "HEX-пакеты не найдены. Поддерживаются HDLC, Wrapper и DLMS APDU."
@@ -211,6 +230,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             {
                 SelectedPacket = textPackets.FirstOrDefault();
                 AnalysisStatus = textStatus;
+                OnPropertyChanged(nameof(AssemblyLayout));
                 OnPropertyChanged(nameof(HasPackets));
             }
         }
@@ -248,6 +268,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             }
             if (liveFaulted) return;
             int packetLimit = PacketLimit;
+            var previousAssemblyLayout = liveAssemblyLayout;
             var update = await Task.Run(() =>
             {
                 liveAnalyzer.SetPacketLimit(packetLimit);
@@ -260,14 +281,24 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
                         $"{capture.Timestamp:yyyy-MM-dd HH:mm:ss.fff} {capture.Transport} {capture.Direction}: {Convert.ToHexString(capture.Bytes.Span)}",
                         capture.SessionId));
                 }
-                return (FirstId: liveAnalyzer.FirstPacketId, Total: liveAnalyzer.TotalPackets,
-                    Changed: liveAnalyzer.TakeChanges());
+                long firstId = liveAnalyzer.FirstPacketId;
+                var changed = liveAnalyzer.TakeChanges();
+                var layout = reset || previousAssemblyLayout.HasExpiredSources(firstId) ||
+                             changed.Any(packet => packet.AssemblySourcePacketIds.Count > 0)
+                    ? PacketAssemblyLayout.Create(liveAnalyzer.Snapshot())
+                    : previousAssemblyLayout;
+                return (FirstId: firstId, Changed: changed, AssemblyLayout: layout);
             }, stopToken);
             if (disposed || trace.ClearedThroughCaptureId != clearedThroughCaptureId || trace.CurrentSessionId != session) return;
             if (captures.Count > 0) lastCapture = captures[^1].Id;
             if (captures.Count == CaptureBatchSize) Interlocked.Exchange(ref dirty, 1);
             if (reset) { livePackets.Clear(); livePacketIndex.Clear(); selections.Remove(0); }
             ReconcileLive(update.FirstId, update.Changed);
+            if (!ReferenceEquals(liveAssemblyLayout, update.AssemblyLayout))
+            {
+                liveAssemblyLayout = update.AssemblyLayout;
+                if (IsLive) OnPropertyChanged(nameof(AssemblyLayout));
+            }
             liveStatus = "";
             if (IsLive)
             {

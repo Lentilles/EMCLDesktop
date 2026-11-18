@@ -15,10 +15,12 @@ internal sealed class PacketCollection : ObservableCollection<PacketItemViewMode
             for (int i = 0; i < count; i++) RemoveAt(0);
             return;
         }
+        CheckReentrancy();
+        var removed = this.Take(count).ToArray();
         var remaining = this.Skip(count).ToArray();
         Items.Clear();
         foreach (var item in remaining) Items.Add(item);
-        NotifyReset();
+        NotifyItemsChanged(new(NotifyCollectionChangedAction.Remove, removed, 0));
     }
 
     public void AddRange(IReadOnlyList<PacketItemViewModel> items)
@@ -28,21 +30,25 @@ internal sealed class PacketCollection : ObservableCollection<PacketItemViewMode
             foreach (var item in items) Add(item);
             return;
         }
-        foreach (var item in items) Items.Add(item);
-        NotifyReset();
+        CheckReentrancy();
+        int start = Count;
+        var added = items.ToArray();
+        foreach (var item in added) Items.Add(item);
+        NotifyItemsChanged(new(NotifyCollectionChangedAction.Add, added, start));
     }
 
     public void ReplaceAll(IEnumerable<PacketItemViewModel> items)
     {
+        CheckReentrancy();
         Items.Clear();
         foreach (var item in items) Items.Add(item);
-        NotifyReset();
+        NotifyItemsChanged(new(NotifyCollectionChangedAction.Reset));
     }
 
-    private void NotifyReset()
+    private void NotifyItemsChanged(NotifyCollectionChangedEventArgs change)
     {
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        OnCollectionChanged(change);
     }
 }

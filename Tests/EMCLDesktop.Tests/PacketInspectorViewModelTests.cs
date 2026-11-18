@@ -1,4 +1,5 @@
 using EMCLDesktop.Services;
+using EMCLDesktop.Services.PacketInspection;
 using EMCLDesktop.ViewModels;
 using Xunit;
 using static EMCLDesktop.Tests.PacketTestData;
@@ -21,6 +22,29 @@ public class PacketInspectorViewModelTests
         // Assert
         Assert.Equal(2, inspector.Packets.Count);
         Assert.NotNull(inspector.SelectedPacket);
+    }
+
+    [Fact]
+    public async Task AnalyzeTextCommand_SegmentedResponse_DrawsBranchesAtSourcesAndResult()
+    {
+        using var inspector = new PacketInspectorViewModel(new DiagnosticTrace()) { SourceIndex = 1 };
+        byte[] response = [0xE6, 0xE7, 0, .. GetResponseApdu];
+        inspector.InputText = string.Join('\n',
+            $"TX: {FormatHex(CreateHdlcFrame([0xE6, 0xE6, 0, .. GetRequestApdu], control: 0x10))}",
+            $"RX: {FormatHex(CreateHdlcFrame(response[..8], rx: true, segmented: true, control: 0x30))}",
+            $"TX: {FormatHex(CreateHdlcFrame([], control: 0x31))}",
+            $"RX: {FormatHex(CreateHdlcFrame(response[8..], rx: true, control: 0x32))}");
+
+        await inspector.AnalyzeTextCommand.ExecuteAsync(null);
+
+        var layout = inspector.AssemblyLayout;
+        Assert.Equal(1, layout.LaneCount);
+        Assert.Empty(layout.LinesAt(1));
+        Assert.Equal(new PacketAssemblyLine(0, false, true, true), Assert.Single(layout.LinesAt(2)));
+        Assert.Equal(new PacketAssemblyLine(0, true, true, false), Assert.Single(layout.LinesAt(3)));
+        Assert.Equal(new PacketAssemblyLine(0, true, true, true), Assert.Single(layout.LinesAt(4)));
+        Assert.Equal(new PacketAssemblyLine(0, true, false, true), Assert.Single(layout.LinesAt(5)));
+        Assert.Equal(new long[] { 2, 4, 1 }, inspector.Packets[^1].Packet.RelatedPacketIds);
     }
 
     [Fact]

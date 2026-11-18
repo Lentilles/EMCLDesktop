@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using Avalonia.Controls;
+using Avalonia.Controls.Selection;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -13,7 +14,9 @@ namespace EMCLDesktop.Views;
 public partial class PacketInspectorView : UserControl
 {
     private PacketInspectorViewModel? observedInspector;
+    private PacketInspectorViewModel? selectionOwner;
     private INotifyCollectionChanged? observedPackets;
+    private readonly Dictionary<INotifyCollectionChanged, SelectionModel<PacketItemViewModel>> packetSelections = [];
     private bool isLoaded;
     private bool scrollPending;
     private bool pointerDown;
@@ -42,6 +45,11 @@ public partial class PacketInspectorView : UserControl
     {
         StopObserving();
         observedInspector = Inspector;
+        if (!ReferenceEquals(selectionOwner, observedInspector))
+        {
+            packetSelections.Clear();
+            selectionOwner = observedInspector;
+        }
         if (observedInspector is null) return;
         observedInspector.PropertyChanged += InspectorPropertyChanged;
         ObservePackets();
@@ -52,7 +60,7 @@ public partial class PacketInspectorView : UserControl
         pointerDown = false;
         lastScrollInput = 0;
         if (observedInspector is not null) observedInspector.PropertyChanged -= InspectorPropertyChanged;
-        if (observedPackets is not null) observedPackets.CollectionChanged -= PacketsChanged;
+        StopObservingPackets();
         observedInspector = null;
         observedPackets = null;
     }
@@ -60,15 +68,53 @@ public partial class PacketInspectorView : UserControl
     private void InspectorPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(PacketInspectorViewModel.Packets)) ObservePackets();
+        if (e.PropertyName == nameof(PacketInspectorViewModel.SelectedPacket) && observedInspector is { } inspector &&
+            ReferenceEquals(observedPackets, inspector.Packets) && PacketList.Selection is SelectionModel<PacketItemViewModel> selection &&
+            !ReferenceEquals(selection.SelectedItem, inspector.SelectedPacket))
+            selection.SelectedItem = inspector.SelectedPacket;
     }
 
     private void ObservePackets()
     {
-        if (observedPackets is not null) observedPackets.CollectionChanged -= PacketsChanged;
+        StopObservingPackets();
         HideScrollButtons();
-        observedPackets = observedInspector?.Packets;
-        if (observedPackets is not null) observedPackets.CollectionChanged += PacketsChanged;
+        var packets = observedInspector!.Packets;
+        if (!packetSelections.TryGetValue(packets, out var selection))
+        {
+            selection = new(packets) { SingleSelect = false };
+            packetSelections.Add(packets, selection);
+        }
+        if (selection.Count == 0) selection.SelectedItem = observedInspector.SelectedPacket;
+
+        // Swap the items and their selection together so the previous source keeps its selection.
+        PacketList.BeginInit();
+        PacketList.ItemsSource = packets;
+        PacketList.Selection = selection;
+        PacketList.EndInit();
+
+        observedPackets = packets;
+        packets.CollectionChanged += PacketsChanged;
+        selection.SelectionChanged += PacketSelectionChanged;
+        ApplyPacketSelection(selection);
         RequestScrollToLast();
+    }
+
+    private void StopObservingPackets()
+    {
+        if (observedPackets is null) return;
+        observedPackets.CollectionChanged -= PacketsChanged;
+        packetSelections[observedPackets].SelectionChanged -= PacketSelectionChanged;
+        observedPackets = null;
+    }
+
+    private void PacketSelectionChanged(object? sender, SelectionModelSelectionChangedEventArgs<PacketItemViewModel> e)
+    {
+        if (sender is SelectionModel<PacketItemViewModel> selection) ApplyPacketSelection(selection);
+    }
+
+    private void ApplyPacketSelection(SelectionModel<PacketItemViewModel> selection)
+    {
+        if (observedInspector is { } inspector) inspector.SelectedPacket = selection.SelectedItem;
     }
 
     private void ScrollToFirstClick(object? sender, RoutedEventArgs e)

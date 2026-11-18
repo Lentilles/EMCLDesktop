@@ -497,7 +497,7 @@ public sealed class PacketAnalyzer
         transfer.Parts.Add((packet, payload));
         if (frame.Segmented) return;
         segments.Remove(segmentKey);
-        var (assembled, mapped) = Combine(transfer.Parts, "Собранный HDLC APDU");
+        var (assembled, mapped) = Combine(transfer.Parts, InspectedPacket.AssembledHdlcFraming);
         ReadLlc(assembled, mapped, scope, source, assembled.Fields);
         LinkParts(transfer.Parts.Select(p => p.Packet.Id), assembled.Id, "HDLC APDU собран");
     }
@@ -598,7 +598,8 @@ public sealed class PacketAnalyzer
             case GetNextRequest next:
                 string nextKey = RequestKey(scope, CosemOperationKind.Read, next.InvokeIdAndPriority);
                 if (requests.TryGetValue(nextKey, out var ongoing) && !ongoing.Ambiguous)
-                    packet = packet with { Target = ongoing.Target, RelatedPacketIds = [ongoing.PacketId] };
+                    packet = packet with { Target = ongoing.Target,
+                        RelatedPacketIds = packet.RelatedPacketIds.Append(ongoing.PacketId).Distinct().ToArray() };
                 break;
             case GetBlockResponse block:
                 string blockKey = RequestKey(scope, CosemOperationKind.Read, block.InvokeIdAndPriority);
@@ -626,7 +627,8 @@ public sealed class PacketAnalyzer
         if (request.Ambiguous)
             return packet with { Diagnostic = Join(packet.Diagnostic, "Неоднозначный Invoke ID; OBIS не определён.") };
         Link(request.PacketId, packet.Id);
-        return packet with { Target = request.Target, RelatedPacketIds = [request.PacketId] };
+        return packet with { Target = request.Target,
+            RelatedPacketIds = packet.RelatedPacketIds.Append(request.PacketId).Distinct().ToArray() };
     }
 
     private void ReadBlock(InspectedPacket packet, GetBlockResponse block, int dataOffset, MappedPayload payload, string key, string scope)
@@ -668,7 +670,7 @@ public sealed class PacketAnalyzer
             return;
         }
         blocks.Remove(key); requests.Remove(key); requestSenders.Remove(key);
-        var (assembled, mapped) = Combine(transfer.Parts, "Собранное DLMS-значение");
+        var (assembled, mapped) = Combine(transfer.Parts, InspectedPacket.AssembledValueFraming);
         var decoded = new AxdrCodec().Decode(new ReadOnlySequence<byte>(mapped.Bytes));
         if (decoded.Status == DecodeStatus.Done && decoded.Consumed == mapped.Bytes.Length && decoded.Value is { } value)
         {
@@ -724,11 +726,12 @@ public sealed class PacketAnalyzer
         }
         long id = NewId();
         var first = parts[0].Packet;
+        var sourceIds = parts.Select(p => p.Packet.Id).ToArray();
         var packet = new InspectedPacket(id, first.Direction, first.Timestamp, kind, raw,
             string.Join("; ", parts.Select(p => p.Packet.Origin).Distinct()),
             string.Join(Environment.NewLine, parts.Select(p => p.Packet.SourceText).Distinct()))
         {
-            Kind = kind, Fields = fields, RelatedPacketIds = parts.Select(p => p.Packet.Id).ToArray(),
+            Kind = kind, Fields = fields, RelatedPacketIds = sourceIds, AssemblySourcePacketIds = sourceIds,
             Diagnostic = "Байты исходных пакетов показаны последовательно; поля могут занимать несколько диапазонов."
         };
         return (packet, new(data.ToArray(), offsets.ToArray()));
