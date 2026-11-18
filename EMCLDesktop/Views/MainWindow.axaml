@@ -14,7 +14,7 @@
         <Border x:Name="UpdateNotice" IsVisible="False" Background="#183C50"
                 Padding="16,10" BorderBrush="#39738B" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="16">
-                <TextBlock Text="Новая версия загружена. Приложение перезапустится и восстановит подключение."
+                <TextBlock Text="Новая версия загружена. Приложение перезапустится для установки обновления."
                            Foreground="#F4F7FC" TextWrapping="Wrap" VerticalAlignment="Center" />
                 <Button x:Name="ApplyUpdateButton" Grid.Column="1" IsEnabled="{ReflectionBinding CanEditConfiguration}" Content="Обновить" Click="ApplyUpdateClick"
                         VerticalAlignment="Center" />

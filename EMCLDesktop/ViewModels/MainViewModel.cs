@@ -705,12 +705,16 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         }
     }
 
-    public async Task SaveConfigurationAsync(Stream stream)
+    public Task SaveConfigurationAsync(Stream stream) => SaveConfigurationAsync(stream, forUpdate: false);
+
+    internal Task SaveUpdateSnapshotAsync(Stream stream) => SaveConfigurationAsync(stream, forUpdate: true);
+
+    private async Task SaveConfigurationAsync(Stream stream, bool forUpdate)
     {
         if (IsBusy || IsReading)
             throw new InvalidOperationException("Дождитесь завершения текущей операции.");
         var options = ParseOptions();
-        using var operation = BeginOperation("сохранение конфигурации");
+        using var operation = BeginOperation(forUpdate ? "сохранение состояния перед обновлением" : "сохранение конфигурации");
         IsBusy = true;
         try
         {
@@ -788,9 +792,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             };
             await JsonSerializer.SerializeAsync(stream, snapshot, SavedConfiguration.JsonOptions, operation.Token);
             await stream.FlushAsync(operation.Token);
-            Status = $"Конфигурация и каталог ({Objects.Count} объектов) сохранены в JSON.";
+            if (!forUpdate)
+                Status = $"Конфигурация и каталог ({Objects.Count} объектов) сохранены в JSON.";
         }
-        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        catch (OperationCanceledException) when (!forUpdate && operation.IsCancellationRequested)
         {
             Status = "Сохранение конфигурации отменено. Файл может быть неполным.";
         }

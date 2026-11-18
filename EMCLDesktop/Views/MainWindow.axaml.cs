@@ -39,30 +39,27 @@ public partial class MainWindow : Window
 
     private async void ApplyUpdateClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm || vm.IsBusy || vm.IsReading || updateInProgress) return;
+        if (DataContext is not MainViewModel vm || vm.IsBusy || vm.IsReading || cleanupStarted || updateInProgress) return;
         updateInProgress = true;
-        string? path = null;
-        bool wasConnected = vm.IsConnected;
         try
         {
-            path = Path.Combine(Path.GetTempPath(), $"emcl-update-{Guid.NewGuid():N}.json");
-            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
-            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            await using (var stream = new FileStream(path, options))
-                await vm.SaveConfigurationAsync(stream);
-            if (wasConnected) await vm.DisconnectForUpdateAsync();
-            DesktopUpdates.Current.ApplyAndRestart(["--restore-update", path, wasConnected ? "connected" : "disconnected"]);
-            path = null; // The restarted process consumes the snapshot.
-            updateInProgress = false;
-            Close();
+            await DesktopUpdates.ApplyAsync(DesktopUpdates.Current, vm);
+        }
+        catch (OperationCanceledException)
+        {
+            vm.Status = "Обновление отменено.";
+            return;
         }
         catch (Exception error)
         {
-            if (path is not null) { try { File.Delete(path); } catch (IOException) { } }
-            if (wasConnected && !vm.IsConnected) await vm.ReconnectAfterUpdateAsync();
-            vm.Status = $"Не удалось запустить обновление: {error.Message}";
+            vm.ReportError($"Не удалось запустить обновление: {error.Message}");
+            return;
+        }
+        finally
+        {
             updateInProgress = false;
         }
+        Close();
     }
 
     public async Task RestoreAfterUpdateAsync(string path, bool reconnect)
@@ -75,12 +72,12 @@ public partial class MainWindow : Window
         try
         {
             bool loaded;
-            await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            await using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.None))
                 loaded = await vm.LoadConfigurationAsync(stream);
             if (loaded && reconnect) await vm.ReconnectAfterUpdateAsync();
         }
         catch (Exception error) { vm.Status = $"Не удалось восстановить состояние после обновления: {error.Message}"; }
-        finally { try { File.Delete(path); } catch (IOException) { } }
+        finally { DesktopUpdates.DeleteSnapshot(fullPath); }
     }
 
     public void OpenConnectionSettings() => MainContent.OpenConnectionSettings();

@@ -186,6 +186,9 @@
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
+        <Style Selector="TextBox.trace-output:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="{StaticResource WorkspaceContentBackground}" />
+        </Style>
         <Style Selector="TextBox.trace-output:focus-within /template/ Border#PART_BorderElement">
             <Setter Property="Background" Value="{StaticResource WorkspaceContentBackground}" />
             <Setter Property="BorderBrush" Value="#69C4E1" />
