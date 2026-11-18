@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using EMCL.Core.Codecs;
+using EMCL.Core.Objects;
 using EMCL.Core.Operations;
 using EMCL.Core.Values;
 using EMCL.Protocol.Acse;
@@ -22,7 +23,7 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
     private int position, fieldCount;
     private int blockDataOffset = -1;
 
-    public static ApduInspection Decode(MappedPayload payload)
+    public static ApduInspection Decode(MappedPayload payload, bool inspectPrefix = false)
     {
         var reader = new ApduFieldDecoder(payload);
         var result = new ApduCodec().Decode(new ReadOnlySequence<byte>(payload.Bytes));
@@ -39,7 +40,9 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         try
         {
             if (result.Status == DecodeStatus.Done && result.Value is { } decoded)
-                reader.ReadApdu(decoded);
+                reader.ReadApdu(decoded, checked((int)result.Consumed));
+            else if (inspectPrefix && result.Status == DecodeStatus.NeedMoreData)
+                reader.ReadPrefix();
             else
             {
                 reader.Take("APDU tag", kind, 1);
@@ -50,6 +53,12 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         catch (Exception error) when (error is InvalidDataException or ArgumentException or OverflowException)
         {
             diagnostic = $"Не удалось разметить поля: {error.Message}";
+        }
+        if (result.Status == DecodeStatus.Done && result.Consumed < payload.Bytes.Length)
+        {
+            int start = checked((int)result.Consumed);
+            reader.fields.Add(payload.Field("Лишние байты", "После завершённого APDU", start, payload.Bytes.Length - start)
+                with { IsError = true });
         }
         return new(kind, payload.Field("DLMS", kind, 0, payload.Bytes.Length, reader.fields.ToArray()),
             result.Status == DecodeStatus.Done && result.Consumed == payload.Bytes.Length ? result.Value : null,
@@ -69,23 +78,74 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         _ => $"APDU 0x{tag:X2}"
     };
 
-    private void ReadApdu(DlmsApdu apdu)
+    private void ReadPrefix()
+    {
+        byte tag = bytes[0];
+        if (tag is >= 0x60 and <= 0x63 && bytes.Length >= 2)
+        {
+            fields.Add(ReadBer(bytes.Length, 0, inspectPrefix: true));
+            return;
+        }
+
+        Take("APDU tag", Name(tag), 1);
+        if (tag is 0xC0 or 0xC1 or 0xC3 or 0xC4 or 0xC5 or 0xC7 && position < bytes.Length)
+        {
+            byte variant = bytes[position];
+            Take("Вариант", variant == 1 ? "1 (normal)" : variant.ToString(CultureInfo.InvariantCulture), 1);
+            if (position < bytes.Length) ReadInvoke();
+            if (variant == 1 && tag is 0xC0 or 0xC1 or 0xC3)
+                ReadRequestPrefix(tag == 0xC3);
+            else if (variant == 1 && tag == 0xC4 && position < bytes.Length && bytes[position] <= 1)
+            {
+                bool hasValue = bytes[position] == 0;
+                Take("Result choice", hasValue ? "data" : "data-access-result", 1);
+                if (hasValue && position < bytes.Length && Enum.IsDefined((DlmsType)bytes[position]))
+                    Take("Тип", $"{(DlmsType)bytes[position]} (0x{bytes[position]:X2})", 1);
+            }
+        }
+
+        if (position < bytes.Length)
+            Take("Неразобранное содержимое", Convert.ToHexString(bytes.AsSpan(position)), bytes.Length - position);
+    }
+
+    private void ReadRequestPrefix(bool isMethod)
+    {
+        if (bytes.Length - position < 2) return;
+        Take("Class ID", BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(position)).ToString(CultureInfo.InvariantCulture), 2);
+        if (bytes.Length - position < LogicalName.EncodedLength) return;
+        Take("OBIS / logical name", LogicalName.FromBytes(bytes.AsSpan(position, LogicalName.EncodedLength)).ToString(),
+            LogicalName.EncodedLength);
+        if (position == bytes.Length) return;
+        Take(isMethod ? "Method ID" : "Attribute ID", ((sbyte)bytes[position]).ToString(CultureInfo.InvariantCulture), 1);
+        if (position == bytes.Length || bytes[position] > 1) return;
+        bool present = bytes[position] != 0;
+        Take(isMethod ? "Параметры присутствуют" : "Selective access присутствует", present ? "да" : "нет", 1);
+        if (present && !isMethod && position < bytes.Length)
+            Take("Access selector", bytes[position].ToString(CultureInfo.InvariantCulture), 1);
+    }
+
+    private void ReadInvoke()
+    {
+        int invokeOffset = position;
+        byte invoke = bytes[position++];
+        fields.Add(payload.Field("Invoke ID / priority", $"0x{invoke:X2}", invokeOffset, 1,
+            payload.Field("Invoke ID", $"{invoke & 15} · mask 0x0F", invokeOffset, 1),
+            payload.Field("Service class", (invoke & 0x40) != 0 ? "confirmed · mask 0x40" : "unconfirmed · mask 0x40", invokeOffset, 1),
+            payload.Field("Priority", (invoke & 0x80) != 0 ? "high · mask 0x80" : "normal · mask 0x80", invokeOffset, 1)));
+    }
+
+    private void ReadApdu(DlmsApdu apdu, int consumed)
     {
         if (apdu is AcseApdu)
         {
-            fields.Add(ReadBer(bytes.Length, 0));
+            fields.Add(ReadBer(consumed, 0));
             return;
         }
         Take("APDU tag", Name(bytes[0]), 1);
         if (apdu is LnRequest or LnResponse or GetNextRequest or GetBlockResponse)
         {
             Take("Вариант", $"{bytes[position]} ({(bytes[position] == 1 ? "normal" : "block / next")})", 1);
-            int invokeOffset = position;
-            byte invoke = bytes[position];
-            fields.Add(payload.Field("Invoke ID / priority", $"0x{invoke:X2}", position++, 1,
-                payload.Field("Invoke ID", $"{invoke & 15} · mask 0x0F", invokeOffset, 1),
-                payload.Field("Service class", (invoke & 0x40) != 0 ? "confirmed · mask 0x40" : "unconfirmed · mask 0x40", invokeOffset, 1),
-                payload.Field("Priority", (invoke & 0x80) != 0 ? "high · mask 0x80" : "normal · mask 0x80", invokeOffset, 1)));
+            ReadInvoke();
         }
         switch (apdu)
         {
@@ -110,7 +170,7 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
                 Take("Last block", block.LastBlock ? "да" : "нет", 1);
                 Take("Block number", block.BlockNumber.ToString(CultureInfo.InvariantCulture), 4);
                 Take("Result choice", block.Error.HasValue ? "data-access-result" : "raw-data", 1);
-                if (block.Error is { } error) Take("Ошибка", error.ToString(), 1);
+                if (block.Error is { } error) Take("Ошибка", error.ToString(), 1, isError: true);
                 else
                 {
                     ReadLengthField(fields, "Длина блока");
@@ -122,7 +182,7 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
                 if (response.Kind == CosemOperationKind.Read)
                     Take("Result choice", response.Result.Value is null ? "data-access-result" : "data", 1);
                 if (response.Kind != CosemOperationKind.Read || response.Result.Error != CosemResultCode.Success)
-                    Take("Результат операции", response.Result.Error.ToString(), 1);
+                    Take("Результат операции", response.Result.Error.ToString(), 1, isError: response.Result.Error != CosemResultCode.Success);
                 if (response.Kind == CosemOperationKind.Invoke)
                 {
                     bool present = bytes[position] != 0;
@@ -130,7 +190,7 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
                     if (present)
                     {
                         Take("Return choice", response.ReturnDataError.HasValue ? "data-access-result" : "data", 1);
-                        if (response.ReturnDataError is { } returnedError) Take("Ошибка return data", returnedError.ToString(), 1);
+                        if (response.ReturnDataError is { } returnedError) Take("Ошибка return data", returnedError.ToString(), 1, isError: true);
                     }
                 }
                 if (response.Result.Value is { } returned) fields.Add(ReadValue("Полученное значение", returned));
@@ -158,7 +218,8 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
                 ReadNegotiation(true);
                 break;
         }
-        if (position < bytes.Length) Take("Оставшиеся байты", Convert.ToHexString(bytes.AsSpan(position)), bytes.Length - position);
+        if (position < consumed)
+            Take("Оставшиеся байты", Convert.ToHexString(bytes.AsSpan(position, consumed - position)), consumed - position);
     }
 
     private void ReadQos()
@@ -250,16 +311,26 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         return reader.ReadValue("Собранное значение", value);
     }
 
-    private InspectionField ReadBer(int end, int depth, bool userInformation = false)
+    private InspectionField ReadBer(int end, int depth, bool userInformation = false, bool inspectPrefix = false, bool associationResult = false)
     {
         if (++fieldCount > MaxFields || depth > 64) throw new InvalidDataException("Слишком сложный BER.");
         int start = position;
         Guard(1);
         byte tag = bytes[position++];
         var children = new List<InspectionField> { payload.Field("BER tag", $"0x{tag:X2}", start, 1) };
+        if (inspectPrefix && (position == end || (bytes[position] & 0x80) != 0 &&
+            (bytes[position] & 0x7F) > end - position - 1))
+        {
+            if (position < end)
+                children.Add(payload.Field("BER length", "Неполная длина", position, end - position));
+            position = end;
+            return payload.Field(depth == 0 ? Name(tag) : $"BER 0x{tag:X2}", "Неполное поле", start, end - start, children.ToArray());
+        }
         int length = ReadLengthField(children, "BER length");
-        int contentStart = position;
-        if (length > end - position) throw new InvalidDataException("BER выходит за границы контейнера.");
+        bool truncated = length > end - position;
+        if (truncated && !inspectPrefix) throw new InvalidDataException("BER выходит за границы контейнера.");
+        int contentLength = Math.Min(length, end - position);
+        int contentEnd = position + contentLength;
         string name = depth == 0 ? Name(tag) : tag switch
         {
             0xA1 => "Application context / diagnostic choice", 0xA2 => "Association result / diagnostic choice",
@@ -270,18 +341,22 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         string summary = "";
         if ((tag & 0x20) != 0)
         {
-            while (position < contentStart + length)
-                children.Add(ReadBer(contentStart + length, depth + 1, userInformation || tag == 0xBE));
+            while (position < contentEnd)
+                children.Add(ReadBer(contentEnd, depth + 1, userInformation || tag == 0xBE, inspectPrefix && truncated,
+                    associationResult: depth == 1 && bytes[0] == 0x61 && tag == 0xA2));
         }
         else
         {
-            summary = Convert.ToHexString(bytes.AsSpan(position, Math.Min(length, 64))) + (length > 64 ? "…" : "");
-            if (tag == 0x02 && length == 1) summary = bytes[position].ToString(CultureInfo.InvariantCulture);
-            if (userInformation && tag == 0x04 && length > 0)
-                children.Add(Decode(payload.Slice(position, length)).Field);
-            else children.Add(payload.Field("Содержимое", summary, position, length));
-            position += length;
+            summary = Convert.ToHexString(bytes.AsSpan(position, Math.Min(contentLength, 64))) + (contentLength > 64 ? "…" : "");
+            if (!truncated && tag == 0x02 && length == 1) summary = bytes[position].ToString(CultureInfo.InvariantCulture);
+            if (userInformation && tag == 0x04 && contentLength > 0)
+                children.Add(Decode(payload.Slice(position, contentLength), inspectPrefix && truncated).Field);
+            else if (contentLength > 0 || !truncated)
+                children.Add(payload.Field("Содержимое", summary, position, contentLength)
+                    with { IsError = associationResult && tag == 0x02 && contentLength == 1 && bytes[position] != 0 });
+            position = contentEnd;
         }
+        if (truncated) summary = $"{contentLength} / {length} байт";
         return payload.Field(name, summary, start, position - start, children.ToArray());
     }
 
@@ -302,10 +377,11 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
         return count;
     }
 
-    private void Take(string name, string value, int length)
+    private void Take(string name, string value, int length, bool isError = false)
     {
         Guard(length);
-        fields.Add(payload.Field(name, value, position, length));
+        var field = payload.Field(name, value, position, length);
+        fields.Add(isError ? field with { IsError = true } : field);
         position += length;
     }
 

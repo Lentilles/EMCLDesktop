@@ -10,6 +10,7 @@ public readonly record struct InspectionRange(int Offset, int Length)
 public sealed record InspectionField(string Name, string Value, IReadOnlyList<InspectionRange> Ranges,
     IReadOnlyList<InspectionField> Children)
 {
+    public bool IsError { get; init; }
     public string Label => string.IsNullOrEmpty(Value) ? Name : $"{Name}: {Value}";
     public int ByteCount => Ranges.Sum(r => r.Length);
     public bool Contains(int offset) => Ranges.Any(r => r.Contains(offset));

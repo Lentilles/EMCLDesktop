@@ -27,6 +27,7 @@ public sealed partial class InspectorFieldViewModel : ObservableObject
     public InspectionField Field { get; }
     public InspectorFieldViewModel? Parent { get; }
     public string Label => Field.Label;
+    public bool IsError => Field.IsError;
     public IReadOnlyList<InspectorFieldViewModel> Children { get; }
     [ObservableProperty] public partial bool IsHighlighted { get; set; }
     [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
@@ -45,12 +46,14 @@ public sealed partial class InspectorFieldViewModel : ObservableObject
     }
 }
 
-public sealed partial class InspectorByteViewModel(int offset, byte value, InspectorFieldViewModel? owner) : ObservableObject
+public sealed partial class InspectorByteViewModel(int offset, byte value, InspectorFieldViewModel? owner, bool isError = false) : ObservableObject
 {
     public int Offset { get; } = offset;
     public string Hex { get; } = value.ToString("X2");
     public InspectorFieldViewModel? Owner { get; } = owner;
-    public string Description => $"+0x{Offset:X6} ({Offset}) · {Hex}\n{Owner?.Label ?? "Поле не определено"}";
+    public bool IsError { get; } = isError;
+    public string Description => $"+0x{Offset:X6} ({Offset}) · {Hex}\n{Owner?.Label ?? "Поле не определено"}" +
+        (IsError ? "\nОшибка в этом поле" : "");
     [ObservableProperty] public partial bool IsHighlighted { get; set; }
 }
 
@@ -71,6 +74,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     private readonly CancellationToken stopToken;
     private readonly Dictionary<int, (long Id, InspectionField? Field, int Page)> selections = [];
     private IReadOnlyList<InspectorFieldViewModel> flatFields = [];
+    private IReadOnlyList<InspectionRange> errorRanges = [];
     private InspectorFieldViewModel?[] byteOwners = [];
     private InspectorFieldViewModel? hoveredField;
     private int dirty = 1, refreshing, liveSession = -1, bytePage, textVersion;
@@ -358,6 +362,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
                     RelatedPackets.Add(new(id, $"Перейти к № {id}"));
         }
         flatFields = Fields.SelectMany(f => f.Flatten()).ToArray();
+        errorRanges = flatFields.Where(field => field.IsError).SelectMany(field => field.Field.Ranges).ToArray();
         byteOwners = new InspectorFieldViewModel?[SelectedPacket?.Packet.Bytes.Length ?? 0];
         // Later, smaller fields own their bytes; no search through a large tree is needed on hover.
         foreach (var field in flatFields)
@@ -436,7 +441,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             for (int offset = bytePage * BytesPerPage; offset < end; offset += 16)
             {
                 var values = Enumerable.Range(offset, Math.Min(16, end - offset))
-                    .Select(i => new InspectorByteViewModel(i, selected.Packet.Bytes[i], byteOwners[i])).ToArray();
+                    .Select(i => new InspectorByteViewModel(i, selected.Packet.Bytes[i], byteOwners[i],
+                        errorRanges.Any(range => range.Contains(i)))).ToArray();
                 ByteRows.Add(new($"{offset:X6}", values));
             }
         }
@@ -446,12 +452,6 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
 
     [RelayCommand] private void PreviousBytePage() { if (CanPreviousPage) { bytePage--; BuildBytePage(); } }
     [RelayCommand] private void NextBytePage() { if (CanNextPage) { bytePage++; BuildBytePage(); } }
-    [RelayCommand] private void ShowFieldBytes()
-    {
-        if (ActiveField?.Field.Ranges.FirstOrDefault() is not { Length: > 0 } range) return;
-        bytePage = range.Offset / BytesPerPage;
-        BuildBytePage();
-    }
     [RelayCommand] private void SelectRelated(RelatedPacketViewModel related) =>
         SelectedPacket = Packets.FirstOrDefault(p => p.Packet.Id == related.Id) ?? SelectedPacket;
 

@@ -29,6 +29,9 @@ public sealed record MeterConnectionOptions(
     ProtocolLimits Limits, string Transport = "TCP", SerialPortSettings? Serial = null)
 {
     internal const double DefaultHdlcAcknowledgementTimeoutSeconds = 1;
+    internal const DlmsConformance SelectableConformance = LnAssociationOptions.SupportedConformance
+        | DlmsConformance.BlockTransferWithAction | DlmsConformance.GeneralBlockTransfer
+        | DlmsConformance.GeneralProtection;
 
     public HighGmacSettings? HighGmac { get; init; }
     public int HdlcInformationFrameRetryCount { get; init; }
@@ -158,7 +161,7 @@ public sealed class MeterConnection : IAsyncDisposable
             throw new ArgumentException("Интервал KeepAlive должен быть от 1 до 3600 секунд.");
         options.Limits.Validate();
         if ((options.Conformance & DlmsConformance.Get) == 0 ||
-            (options.Conformance & ~LnAssociationOptions.SupportedConformance) != 0)
+            (options.Conformance & ~MeterConnectionOptions.SelectableConformance) != 0)
             throw new ArgumentException("Conformance должен включать Get и только поддерживаемые службы.");
         if ((options.Authentication == ClientAuthentication.High || options.HighGmac is not null) &&
             (options.Conformance & DlmsConformance.Action) == 0)
@@ -169,6 +172,10 @@ public sealed class MeterConnection : IAsyncDisposable
 
         var security = options.HighGmac?.CreateProtocol(new PersistentInvocationCounterStore(
             PersistentInvocationCounterStore.DefaultDirectory, options.HighGmac.ParseInitialCounter()));
+        // Without message protection, GeneralProtection is a wire-level compatibility flag.
+        var serviceConformance = security is null
+            ? options.Conformance & ~DlmsConformance.GeneralProtection
+            : options.Conformance;
         var idleTimeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
         var framing = options.CreateFraming(trace);
         var password = Password(options);
@@ -202,7 +209,8 @@ public sealed class MeterConnection : IAsyncDisposable
                     Security = security,
                     Password = password,
                     MaxReceivePduSize = options.MaxReceivePduSize,
-                    Conformance = options.Conformance,
+                    Conformance = serviceConformance,
+                    AdvertisedConformance = serviceConformance != options.Conformance ? options.Conformance : null,
                     HlsInvokeIdAndPriority = invokeOverride
                 }
             });

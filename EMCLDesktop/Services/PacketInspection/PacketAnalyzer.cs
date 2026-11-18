@@ -139,14 +139,15 @@ public sealed class PacketAnalyzer
             }
             if (remaining[0] == 0x7E)
             {
-                if (remaining.Length < 3 && (!fromText || (remaining[1] & 0xF0) == 0xA0)) break;
-                if (fromText && (remaining[1] & 0xF0) != 0xA0)
+                bool type3 = (remaining[1] & 0xF0) == 0xA0;
+                if (remaining.Length < 3 && (!fromText || type3)) break;
+                if (fromText && !type3 && (!aligned || !isByteDump))
                 {
                     offset++;
                     continue;
                 }
-                int length = ((remaining[1] & 7) << 8) | remaining[2];
-                if ((remaining[1] & 0xF0) == 0xA0 && length >= 7)
+                int length = remaining.Length >= 3 ? ((remaining[1] & 7) << 8) | remaining[2] : 0;
+                if (type3 && length >= 7)
                 {
                     found = aligned = true;
                     if (remaining.Length < length + 2 || remaining[length + 1] != 0x7E)
@@ -154,19 +155,24 @@ public sealed class PacketAnalyzer
                         int recovered = FindValidFrameStart(stream.Bytes.AsMemory(offset), includeWrapper: fromText);
                         if (recovered > 0)
                         {
-                            Put(MakePacket(stream, offset, recovered, "HDLC") with
-                            {
-                                Kind = "HDLC · повреждённая длина / обрыв", HasError = true,
-                                Diagnostic = "Перед следующим корректным кадром обнаружены неполные или повреждённые данные.",
-                                Fields = [InspectionField.At("Повреждённый фрагмент", "Граница восстановлена по следующему корректному кадру", 0, recovered)]
-                            });
+                            ReadHdlc(MakePacket(stream, offset, recovered, "HDLC"), input.SessionId,
+                                "Перед следующим корректным кадром обнаружены неполные или повреждённые данные.", hasError: true);
                             offset += recovered;
                             continue;
                         }
                         if (remaining.Length < length + 2) break;
+
+                        var following = remaining[(length + 1)..];
+                        bool startsAnotherPacket = IsWrapperStart(following) ||
+                            (input.Framing != "HDLC" && (IsApduStart(following[0]) || following[0] is 0xE6 or 0xFF));
+                        int count = length + 1;
+                        if (!startsAnotherPacket && HasValidHdlcBody(stream.Bytes.AsMemory(offset, count))) count++;
+                        ReadHdlc(MakePacket(stream, offset, count, "HDLC"), input.SessionId,
+                            "На ожидаемой позиции отсутствует конечный флаг 7E.", hasError: true);
+                        offset += count;
+                        continue;
                     }
-                    var packet = MakePacket(stream, offset, length + 2, "HDLC");
-                    ReadHdlc(packet, input.SessionId);
+                    ReadHdlc(MakePacket(stream, offset, length + 2, "HDLC"), input.SessionId);
                     offset += length + 1; // Closing flag can also open the next frame.
                     continue;
                 }
@@ -183,7 +189,9 @@ public sealed class PacketAnalyzer
                 {
                     Kind = "HDLC · неверный заголовок", HasError = true,
                     Diagnostic = "Ожидался HDLC format type 3 с допустимой длиной.",
-                    Fields = [InspectionField.At("Неразобранный HDLC", "Неверный заголовок", 0, badLength)]
+                    Fields = [InspectionField.At("Неразобранный HDLC", "Неверный заголовок", 0, badLength,
+                        InspectionField.At("Frame format", type3 ? $"Недопустимая длина {length}" : $"Недопустимый тип 0x{remaining[1] >> 4:X}",
+                            1, type3 ? 2 : 1) with { IsError = true })]
                 });
                 found = true;
                 offset += badLength;
@@ -273,14 +281,22 @@ public sealed class PacketAnalyzer
             return found || isByteDump;
         if (stream.Bytes.Length > 1 || stream.Bytes.Length == 1 && stream.Bytes[0] != 0x7E)
         {
-            var pending = MakePacket(stream, 0, stream.Bytes.Length, input.Framing);
+            bool isHdlc = stream.Bytes is [0x7E, >= 0xA0 and <= 0xAF, ..];
+            var pending = MakePacket(stream, 0, stream.Bytes.Length, isHdlc ? "HDLC" : input.Framing);
             stream.PendingId = pending.Id;
-            Put(pending with
+            if (isHdlc)
             {
-                Kind = "Неполный пакет", IsIncomplete = true,
-                Diagnostic = "Не хватает байтов; ожидается продолжение.",
-                Fields = [InspectionField.At("Доступные байты", "Неполный пакет", 0, pending.Bytes.Length)]
-            });
+                ReadHdlc(pending, input.SessionId, "Не хватает байтов; ожидается продолжение.");
+            }
+            else
+            {
+                Put(pending with
+                {
+                    Kind = "Неполный пакет", IsIncomplete = true,
+                    Diagnostic = "Не хватает байтов; ожидается продолжение.",
+                    Fields = [InspectionField.At("Доступные байты", "Неполный пакет", 0, pending.Bytes.Length)]
+                });
+            }
             found = true;
         }
         return found;
@@ -297,55 +313,125 @@ public sealed class PacketAnalyzer
             Annotate(request.PacketId, "Ответ в логе не найден.");
     }
 
-    private void ReadHdlc(InspectedPacket packet, int session)
+    private void ReadHdlc(InspectedPacket packet, int session, string? incompleteDiagnostic = null, bool hasError = false)
     {
         var bytes = packet.Bytes;
-        var result = new HdlcCodec().Decode(new ReadOnlySequence<byte>(bytes));
-        var fields = new List<InspectionField>
-        {
-            InspectionField.At("Начальный флаг", "7E", 0, 1),
-            InspectionField.At("Frame format", $"длина {bytes.Length - 2} · segmented={((bytes[1] & 8) != 0)}", 1, 2,
-                InspectionField.At("Segmentation bit", $"{((bytes[1] & 8) != 0)} · mask 0x08", 1, 1))
-        };
+        bool incomplete = incompleteDiagnostic is not null;
+        bool segmented = (bytes[1] & 8) != 0;
+        var fields = new List<InspectionField> { InspectionField.At("Начальный флаг", "7E", 0, 1) };
+        int declaredLength = bytes.Length >= 3 ? ((bytes[1] & 7) << 8) | bytes[2] : 0;
+        int length = incomplete && hasError ? VerifyHdlcLength(bytes, declaredLength) : declaredLength;
+        bool badLength = declaredLength != length;
+        string lengthText = bytes.Length < 3 ? "длина неполная" : badLength ? $"длина {declaredLength}, фактически {length}" : $"длина {length}";
+        fields.Add(InspectionField.At("Frame format",
+            $"{lengthText} · segmented={segmented}",
+            1, Math.Min(2, bytes.Length - 1),
+            InspectionField.At("Segmentation bit", $"{segmented} · mask 0x08", 1, 1)) with { IsError = badLength });
+
+        string controlName = "заголовок";
+        var payloadFields = new List<InspectionField>();
+        int fcs = length - 1;
+        int headerEnd = Math.Min(bytes.Length, fcs);
         int position = 3;
-        int destinationStart = position;
-        var destination = ReadAddress(bytes, ref position);
-        fields.Add(InspectionField.At("Destination", destination.Display, destinationStart, position - destinationStart));
-        int sourceStart = position;
-        var source = ReadAddress(bytes, ref position);
-        fields.Add(InspectionField.At("Source", source.Display, sourceStart, position - sourceStart));
-        if (position >= bytes.Length - 3)
+        var destination = ReadAddress(bytes, ref position, headerEnd, headerEnd == fcs, "Destination", fields);
+        var source = destination is null ? null : ReadAddress(bytes, ref position, headerEnd, headerEnd == fcs, "Source", fields);
+        if (destination is null || source is null || position >= headerEnd)
         {
-            Put(packet with { Kind = "HDLC · ошибка", Fields = fields, HasError = true, Diagnostic = "Неполный заголовок HDLC." });
+            Put(Describe() with
+            {
+                HasError = !incomplete || hasError || fields.Any(field => field.IsError),
+                Diagnostic = incompleteDiagnostic ?? "Неполный заголовок HDLC."
+            });
             return;
         }
-        byte control = bytes[position];
-        string controlName = ControlName(control);
-        fields.Add(InspectionField.At("Control", $"0x{control:X2} · {controlName}", position, 1));
-        position++;
-        int available = bytes.Length - position - 3;
-        int infoStart = position;
-        if (available > 2)
+
+        if (fields[^2].ByteCount != 1 && fields[^1].ByteCount != 1)
         {
-            bool validHcs = ReadCrc(bytes, position) == HdlcChecksum.Compute(bytes.AsSpan(1, position - 1));
-            fields.Add(InspectionField.At("HCS", validHcs ? "OK" : "CRC не совпадает", position, 2));
-            infoStart = position + 2;
-            fields.Add(InspectionField.At("Information", $"{available - 2} байт", infoStart, available - 2));
+            fields[^2] = fields[^2] with { IsError = true };
+            fields[^1] = fields[^1] with { IsError = true };
         }
-        int fcs = bytes.Length - 3;
-        bool validFcs = ReadCrc(bytes, fcs) == HdlcChecksum.Compute(bytes.AsSpan(1, fcs - 1));
-        fields.Add(InspectionField.At("FCS", validFcs ? "OK" : "CRC не совпадает", fcs, 2));
-        fields.Add(InspectionField.At("Конечный флаг", $"{bytes[^1]:X2}", bytes.Length - 1, 1));
-        var hdlc = InspectionField.At("HDLC", controlName, 0, bytes.Length, fields.ToArray());
-        packet = packet with { Kind = $"HDLC {controlName}", Fields = [hdlc] };
+        byte control = bytes[position++];
+        controlName = ControlName(control);
+        int controlFieldIndex = fields.Count;
+        fields.Add(InspectionField.At("Control", $"0x{control:X2} · {controlName}", position - 1, 1));
+        int infoStart = position;
+        int infoLength = 0;
+        if (fcs - position is 1 or 2)
+            fields[1] = fields[1] with { IsError = true };
+        if (fcs - position > 2)
+        {
+            int hcsLength = Math.Min(2, headerEnd - position);
+            AddChecksum("HCS", position, hcsLength);
+            infoStart = position + 2;
+            infoLength = Math.Max(0, headerEnd - infoStart);
+            if (infoLength > 0)
+                fields.Add(InspectionField.At("Information",
+                    headerEnd == fcs ? $"{infoLength} байт" : $"{infoLength} / {fcs - infoStart} байт", infoStart, infoLength));
+        }
+        AddChecksum("FCS", fcs, Math.Clamp(bytes.Length - fcs, 0, 2));
+        if (!incomplete)
+            fields.Add(InspectionField.At("Конечный флаг", "7E", length + 1, 1));
+        else if (hasError && bytes.Length > length + 1 && !fields.Any(field => field.IsError))
+            fields.Add(InspectionField.At("Конечный флаг", $"0x{bytes[length + 1]:X2} · ожидался 7E", length + 1, 1) with { IsError = true });
+
+        string scope = Scope(session, $"HDLC:{Pair(source, destination)}");
+        string segmentKey = $"{scope}|{source}";
+        if (incompleteDiagnostic is not null)
+        {
+            if (infoLength > 0)
+            {
+                bool carriesLlc = (control & HdlcFrameFormat.InformationTypeMask) == 0 ||
+                    (control & HdlcFrameFormat.ControlWithoutPollFinalMask) == HdlcFrameFormat.UnnumberedInformationControl;
+                if (!carriesLlc)
+                {
+                    payloadFields.Add(ReadUaParameters(bytes, infoStart, infoLength));
+                }
+                else if (!segments.ContainsKey(segmentKey))
+                {
+                    var preview = MappedPayload.Contiguous(bytes, infoStart, infoLength);
+                    string direction = LlcDirection(preview.Bytes);
+                    if (direction != "?" || preview.Bytes is [0xE6 or 0xFF] or [0xE6 or 0xFF, 0xE6 or 0xE7])
+                        payloadFields.Add(LlcField(preview));
+                    if (direction != "?")
+                    {
+                        if (packet.Direction == "?") packet = packet with { Direction = direction };
+                        if (infoLength > 3)
+                            payloadFields.Add(ApduFieldDecoder.Decode(preview.Slice(3, infoLength - 3), inspectPrefix: true).Field);
+                    }
+                }
+            }
+            string diagnostic = !hasError && bytes.Length == length + 1
+                ? "Получено тело HDLC-кадра; ожидается конечный флаг 7E."
+                : incompleteDiagnostic;
+            Put(Describe() with { Diagnostic = diagnostic, HasError = hasError || fields.Any(field => field.IsError) });
+            return;
+        }
+
+        packet = Describe();
+        var hdlc = packet.Fields[0];
+        var result = new HdlcCodec().Decode(new ReadOnlySequence<byte>(bytes));
         if (result.Status != DecodeStatus.Done || result.Value is not { } frame)
         {
-            ClearScope(Scope(session, $"HDLC:{Pair(source.Key, destination.Key)}"));
+            ClearScope(scope);
             Put(packet with { HasError = true, Diagnostic = $"HDLC: {result.Error ?? result.Status.ToString()}" });
             return;
         }
-        string scope = Scope(session, $"HDLC:{Pair(source.Key, destination.Key)}");
-        string segmentKey = $"{scope}|{source.Key}";
+
+        InspectedPacket Describe() => packet with
+        {
+            Kind = $"HDLC {controlName}",
+            IsIncomplete = incomplete,
+            Fields = [InspectionField.At("HDLC", controlName, 0, bytes.Length, fields.ToArray()), .. payloadFields]
+        };
+
+        void AddChecksum(string name, int offset, int count)
+        {
+            if (count == 0) return;
+            bool mismatch = count == 2 && ReadCrc(bytes, offset) != HdlcChecksum.Compute(bytes.AsSpan(1, offset - 1));
+            string value = count < 2 ? "Получен 1 из 2 байтов" : mismatch ? "CRC не совпадает" : "OK";
+            fields.Add(InspectionField.At(name, value, offset, count) with { IsError = mismatch && !badLength });
+        }
+
         segments.TryGetValue(segmentKey, out var transfer);
         if (packet.Direction == "?")
         {
@@ -379,7 +465,7 @@ public sealed class PacketAnalyzer
         var payload = MappedPayload.Contiguous(bytes, infoStart, frame.Information.Length);
         if (transfer is null && !frame.Segmented)
         {
-            ReadLlc(packet, payload, scope, source.Key, [hdlc]);
+            ReadLlc(packet, payload, scope, source, [hdlc]);
             return;
         }
         if (transfer is null) segments[segmentKey] = transfer = new();
@@ -394,7 +480,8 @@ public sealed class PacketAnalyzer
             }
             foreach (var part in transfer.Parts) Annotate(part.Packet.Id, "Нарушен порядок HDLC-сегментов.", true);
             segments.Remove(segmentKey);
-            Put(packet with { HasError = true, Diagnostic = "Нарушен порядок HDLC-сегментов; APDU не собран." });
+            fields[controlFieldIndex] = fields[controlFieldIndex] with { IsError = true };
+            Put(Describe() with { HasError = true, Diagnostic = "Нарушен порядок HDLC-сегментов; APDU не собран." });
             return;
         }
         transfer.ByteCount += payload.Bytes.Length;
@@ -411,7 +498,7 @@ public sealed class PacketAnalyzer
         if (frame.Segmented) return;
         segments.Remove(segmentKey);
         var (assembled, mapped) = Combine(transfer.Parts, "Собранный HDLC APDU");
-        ReadLlc(assembled, mapped, scope, source.Key, assembled.Fields);
+        ReadLlc(assembled, mapped, scope, source, assembled.Fields);
         LinkParts(transfer.Parts.Select(p => p.Packet.Id), assembled.Id, "HDLC APDU собран");
     }
 
@@ -434,15 +521,26 @@ public sealed class PacketAnalyzer
         string direction = LlcDirection(payload.Bytes);
         if (direction == "?")
         {
-            Put(packet with { HasError = true, Diagnostic = "Нет корректного LLC-заголовка; возможно, начало APDU отсутствует в логе.", Fields = outer });
+            Put(packet with { HasError = true, Diagnostic = "Нет корректного LLC-заголовка; возможно, начало APDU отсутствует в логе.",
+                Fields = payload.Bytes.Length == 0 ? outer : [.. outer, LlcField(payload)] });
             return;
         }
         if (packet.Direction == "?") packet = packet with { Direction = direction };
-        var llc = payload.Field("LLC", payload.Bytes[1] == 0xE7 ? "response" : "command", 0, 3,
-            payload.Field("Destination LSAP", $"0x{payload.Bytes[0]:X2}", 0, 1),
-            payload.Field("Source LSAP", $"0x{payload.Bytes[1]:X2}", 1, 1),
-            payload.Field("Quality", "0x00", 2, 1));
-        ReadApdu(packet, payload.Slice(3, payload.Bytes.Length - 3), scope, sender, [.. outer, llc]);
+        ReadApdu(packet, payload.Slice(3, payload.Bytes.Length - 3), scope, sender, [.. outer, LlcField(payload)]);
+    }
+
+    private static InspectionField LlcField(MappedPayload payload)
+    {
+        var bytes = payload.Bytes;
+        var fields = new List<InspectionField> { ByteField("Destination LSAP", 0, bytes[0] is 0xE6 or 0xFF) };
+        if (bytes.Length >= 2) fields.Add(ByteField("Source LSAP", 1, bytes[1] is 0xE6 or 0xE7));
+        if (bytes.Length >= 3) fields.Add(ByteField("Quality", 2, bytes[2] == 0));
+        string label = fields.Any(field => field.IsError) ? "Неверный заголовок" :
+            bytes.Length < 3 ? "Неполный заголовок" : bytes[1] == 0xE7 ? "response" : "command";
+        return payload.Field("LLC", label, 0, Math.Min(3, bytes.Length), fields.ToArray());
+
+        InspectionField ByteField(string name, int offset, bool valid) =>
+            payload.Field(name, $"0x{bytes[offset]:X2}", offset, 1) with { IsError = !valid };
     }
 
     private void ReadApdu(InspectedPacket packet, MappedPayload payload, string scope, string sender, IReadOnlyList<InspectionField> outer)
@@ -737,6 +835,21 @@ public sealed class PacketAnalyzer
         _ => "?"
     };
     private static bool IsApduStart(byte tag) => ApduDirection(tag) != "?" || tag is 0x25 or 0xDB or 0xDC;
+    private static bool HasValidHdlcBody(ReadOnlyMemory<byte> bytes) =>
+        new HdlcCodec { AllowMissingClosingFlag = true }.Decode(new ReadOnlySequence<byte>(bytes)).Status == DecodeStatus.Done;
+
+    private static int VerifyHdlcLength(byte[] bytes, int declared)
+    {
+        int observed = bytes.Length - 2;
+        if (observed == declared || observed is < 7 or > 0x7FF || bytes[^1] != 0x7E) return declared;
+
+        // Only blame the length if changing that field alone restores both the boundary and the checksums.
+        var candidate = bytes.AsSpan(0, bytes.Length - 1).ToArray();
+        candidate[1] = (byte)((candidate[1] & 0xF8) | (observed >> 8));
+        candidate[2] = (byte)observed;
+        return HasValidHdlcBody(candidate) ? observed : declared;
+    }
+
     private static int FindValidFrameStart(ReadOnlyMemory<byte> bytes, bool includeWrapper)
     {
         for (int i = 1; i < bytes.Length - 3; i++)
@@ -766,25 +879,32 @@ public sealed class PacketAnalyzer
         _ when (control & 0x0F) == 1 => $"RR · N(R)={(control >> 5) & 7}", _ => $"0x{control:X2}"
     };
 
-    private static (string Display, string Key) ReadAddress(byte[] bytes, ref int position)
+    private static string? ReadAddress(byte[] bytes, ref int position, int end, bool atFieldBoundary, string name, List<InspectionField> fields)
     {
         int start = position;
         uint value = 0;
-        bool complete = false;
-        while (position < bytes.Length - 3 && position - start < 4)
+        while (position < end && position - start < 4)
         {
             byte current = bytes[position++];
             value = value << 7 | (uint)(current >> 1);
-            if ((current & 1) != 0) { complete = true; break; }
+            if ((current & 1) == 0) continue;
+
+            int length = position - start;
+            string key = length switch
+            {
+                2 => $"{value >> 7}.{value & 127}",
+                4 => $"{value >> 14}.{value & 16383}",
+                _ => value.ToString(CultureInfo.InvariantCulture)
+            };
+            fields.Add(InspectionField.At(name,
+                $"{value} / {length} байт{(length is 2 or 4 ? $" · logical/physical {key}" : "")}", start, length)
+                with { IsError = length == 3 });
+            return key;
         }
-        int length = position - start;
-        string key = length switch
-        {
-            2 => $"{value >> 7}.{value & 127}",
-            4 => $"{value >> 14}.{value & 16383}",
-            _ => value.ToString(CultureInfo.InvariantCulture)
-        };
-        return ($"{value} / {length} байт{(length is 2 or 4 ? $" · logical/physical {key}" : "")}{(complete ? "" : " · адрес неполный")}", key);
+        if (position > start)
+            fields.Add(InspectionField.At(name, $"Неполный адрес · {Convert.ToHexString(bytes.AsSpan(start, position - start))}",
+                start, position - start) with { IsError = atFieldBoundary || position - start == 4 });
+        return null;
     }
 
     private static InspectionField ReadUaParameters(byte[] bytes, int start, int length)

@@ -301,11 +301,13 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ConformanceOptionViewModel">
-                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}"
+                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                               Margin="0,0,18,8" />
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <TextBlock Text="GeneralProtection можно предложить для совместимости с УСПД. Защиту сообщений включает режим HighGMAC."
+                                   Classes="muted" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <CheckBox Content="Пропускать одинаковые записи object_list"
                               IsChecked="{Binding IgnoreIdenticalObjectListEntries}" />

@@ -65,8 +65,11 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         new("SelectiveAccess", DlmsConformance.SelectiveAccess),
         new("BlockTransferWithGet", DlmsConformance.BlockTransferWithGet),
         new("BlockTransferWithSet", DlmsConformance.BlockTransferWithSet),
+        new("BlockTransferWithAction", DlmsConformance.BlockTransferWithAction),
+        new("GeneralBlockTransfer", DlmsConformance.GeneralBlockTransfer),
         new("DataNotification", DlmsConformance.DataNotification),
-        new("PriorityManagement", DlmsConformance.PriorityManagement)
+        new("PriorityManagement", DlmsConformance.PriorityManagement),
+        new("GeneralProtection", DlmsConformance.GeneralProtection)
     ];
     public ObservableCollection<MeterObjectViewModel> Objects { get; } = [];
     public ObservableCollection<ObjectGroupViewModel> VisibleGroups { get; } = [];
@@ -552,9 +555,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
                 }
                 : new ProtocolLimits();
             importedLimits.Validate();
-            var importedConformance = Enum.Parse<DlmsConformance>(
-                GetString(association, "conformance", "Get, BlockTransferWithGet"), true);
-            if ((importedConformance & ~LnAssociationOptions.SupportedConformance) != 0)
+            var importedConformance = GetNullableString(association, "conformance") is { } conformanceText
+                ? Enum.Parse<DlmsConformance>(conformanceText, true)
+                : MeterConnectionOptions.SelectableConformance;
+            if ((importedConformance & ~MeterConnectionOptions.SelectableConformance) != 0)
                 throw new ArgumentException("Конфигурация содержит неподдерживаемые флаги Conformance.");
             bool importedUseFixedInvokeC1 = GetBool(association, "useFixedInvokeC1", false);
             bool importedUseHighPriority = GetBool(association, "useHighPriority", false);

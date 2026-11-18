@@ -135,7 +135,9 @@ Selecting an object does not read its values. A saved catalog remains visible af
 
 `HighGMAC` has a separate settings section for the 16-byte authentication and block cipher keys, the 8-byte client and meter system titles (all in HEX), and the initial outgoing invocation counter. The app connects directly without reading the counter from the meter. It durably reserves counters across restarts and uses the greater of the entered and saved values; make sure the entered value is acceptable to the meter and coordinate other clients using the same key and client system title. HighGMAC uses authentication and encryption and requires `Action` in Conformance. JSON profiles store HighGMAC keys without encryption.
 
-`High` authentication requires a 16-byte secret. All supported Conformance flags are enabled by default and can be toggled individually; loading a JSON configuration restores them from the file. Reading the association requires `Get`; `High` authentication also requires `Action`.
+`High` authentication requires a 16-byte secret. All supported Conformance flags are enabled by default for new connections and complete association profiles without a Conformance setting. Each flag can be toggled individually. JSON profiles restore the choices saved in `association.conformance`. Reading the association requires `Get`. `High` and `HighGMAC` also require `Action`.
+
+Enable `GeneralProtection` when a device such as a USPD returns that flag in `AARE`. With `High`, the app advertises it for association negotiation and continues to use the selected authentication mode. `HighGMAC` enables message protection and can also negotiate this flag.
 
 - **High request priority** sets bit `0x80` on requests and keeps the automatically allocated Invoke IDs. Enable `PriorityManagement` in Conformance and ensure the meter negotiates it.
 - **Accept responses with a different Invoke ID or priority** allows a mismatch during HLS and subsequent exchanges, including GET and SET block transfers. The application sends one request at a time and EMCL checks the response service, block sequence, and HLS challenge.
@@ -186,7 +188,7 @@ Ranges are sent to the meter using DLMS selective access, which requires the neg
 
 Connect, read the current object tree, and expand **Method invocation** (`Вызов метода`) on the selected object. Enable **Send parameter** (`Передать параметр`) to send a typed DLMS value. The editor preselects the catalog type when available and uses the same value syntax as attribute writes, with HEX for octet strings. To send an explicit DLMS `Null`, select `Null` and enter `null`. Clearing the checkbox omits the parameter. Click **Invoke method** (`Вызвать метод`) to send the request.
 
-Invocation requires negotiated `Action` and method access from the current association. Association LN v1 authenticated access requires an authenticated connection. Methods with v3 message protection requirements are unavailable. EMCL 0.1.1 supports normal ACTION within the negotiated PDU limits.
+Invocation requires negotiated `Action` and method access from the current association. Association LN v1 authenticated access requires an authenticated connection. Larger ACTION messages can use `BlockTransferWithAction` or `GeneralBlockTransfer` when negotiated.
 
 The method card shows any returned value, a meter rejection code, or an unconfirmed outcome if the reply is lost. The application sends each invocation once. After a confirmed or unconfirmed invocation, reread the object's attributes to get their current values.
 
