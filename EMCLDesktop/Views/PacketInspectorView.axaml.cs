@@ -68,6 +68,11 @@ public partial class PacketInspectorView : UserControl
     private void InspectorPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(PacketInspectorViewModel.Packets)) ObservePackets();
+        if (e.PropertyName == nameof(PacketInspectorViewModel.FieldPreview))
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (isLoaded && FieldPreviewList.ItemCount > 0) FieldPreviewList.ScrollIntoView(0);
+            }, DispatcherPriority.Loaded);
         if (e.PropertyName == nameof(PacketInspectorViewModel.SelectedPacket) && observedInspector is { } inspector &&
             ReferenceEquals(observedPackets, inspector.Packets) && PacketList.Selection is SelectionModel<PacketItemViewModel> selection &&
             !ReferenceEquals(selection.SelectedItem, inspector.SelectedPacket))
@@ -219,6 +224,12 @@ public partial class PacketInspectorView : UserControl
             if (isLoaded && AutoScrollToggle.IsChecked == true && Inspector?.Packets is { Count: > 0 } packets)
                 PacketList.ScrollIntoView(packets[^1]);
         }, DispatcherPriority.Background);
+    }
+
+    private void PacketDetailsSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        // A short hex page uses its natural height. A full page leaves space for the field preview.
+        PacketBytesScroll.MaxHeight = e.NewSize.Height * 0.4;
     }
 
     private void FieldPointerEntered(object? sender, PointerEventArgs e)

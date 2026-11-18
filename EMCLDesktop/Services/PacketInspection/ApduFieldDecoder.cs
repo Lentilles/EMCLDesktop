@@ -283,10 +283,10 @@ internal sealed class ApduFieldDecoder(MappedPayload payload)
                 summary = DlmsDisplay.Value(value);
                 if (value.Type == DlmsType.OctetString && length == 6)
                     summary += $" · OBIS-кандидат {string.Join('.', bytes.AsSpan(valueStart, length).ToArray())}";
-                children.Add(payload.Field("Значение", summary, valueStart, length));
+                children.Add(payload.Field("Значение", summary, valueStart, length) with { DecodedValue = value });
                 break;
         }
-        return payload.Field(name, summary, start, position - start, children.ToArray());
+        return payload.Field(name, summary, start, position - start, children.ToArray()) with { DecodedValue = value };
     }
 
     private InspectionField ReadDescription(CompactTypeDescription description, int depth)

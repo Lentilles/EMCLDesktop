@@ -111,6 +111,9 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     [ObservableProperty] public partial string AnalysisStatus { get; set; } = "";
     [ObservableProperty] public partial PacketItemViewModel? SelectedPacket { get; set; }
     [ObservableProperty] public partial InspectorFieldViewModel? SelectedField { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasFieldPreview))]
+    public partial IReadOnlyList<InspectorFieldPreviewRow> FieldPreview { get; private set; } = [];
+    public bool HasFieldPreview => FieldPreview.Count > 0;
     public ObservableCollection<PacketItemViewModel> Packets => IsLive ? livePackets : textPackets;
     public PacketAssemblyLayout AssemblyLayout => IsLive ? liveAssemblyLayout : textAssemblyLayout;
     public ObservableCollection<InspectorFieldViewModel> Fields { get; } = [];
@@ -132,6 +135,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             : string.Join(", ", active.Field.Ranges.Take(24).Select(r => $"+0x{r.Offset:X6}…+0x{r.Offset + r.Length - 1:X6}")) +
               (active.Field.Ranges.Count > 24 ? ", …" : "") + $" · {active.Field.ByteCount} байт"
         : "";
+    public string ByteHighlightText => ActiveField is null ? FieldName
+        : ReferenceEquals(ActiveField, SelectedField) ? FieldRanges : $"{FieldName} · {FieldRanges}";
     public string BytePageText => SelectedPacket is { } selected
         ? $"Байты {bytePage * BytesPerPage}–{Math.Min(selected.Packet.Bytes.Length, (bytePage + 1) * BytesPerPage) - 1} из {selected.Packet.Bytes.Length} · смещения от 0"
         : "";
@@ -416,6 +421,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
 
     partial void OnSelectedFieldChanged(InspectorFieldViewModel? value)
     {
+        FieldPreview = InspectorFieldPreviewRow.Create(value?.Field);
         hoveredField = null;
         for (var parent = value?.Parent; parent is not null; parent = parent.Parent) parent.IsExpanded = true;
         if (value?.Field.Ranges.FirstOrDefault() is { Length: > 0 } range && range.Offset / BytesPerPage != bytePage)
@@ -460,6 +466,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             foreach (var value in row.Bytes) value.IsHighlighted = active?.Contains(value.Offset) == true;
         OnPropertyChanged(nameof(ActiveField)); OnPropertyChanged(nameof(FieldName));
         OnPropertyChanged(nameof(FieldValue)); OnPropertyChanged(nameof(FieldRanges));
+        OnPropertyChanged(nameof(ByteHighlightText));
     }
 
     private void BuildBytePage()

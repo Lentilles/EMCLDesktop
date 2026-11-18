@@ -48,6 +48,55 @@ public class PacketInspectorViewModelTests
     }
 
     [Fact]
+    public async Task SelectedField_SegmentedValue_ShowsNestedValuesWithoutExpandingThePacketTree()
+    {
+        using var inspector = new PacketInspectorViewModel(new DiagnosticTrace()) { SourceIndex = 1 };
+        byte[] response = Convert.FromHexString("E6E700C401C10001010202090C07EA0B12030A00000000000006000003E8");
+        inspector.InputText = $"RX: {FormatHex(CreateHdlcFrame(response[..15], rx: true, segmented: true, control: 0x30))}\n" +
+                              $"RX: {FormatHex(CreateHdlcFrame(response[15..], rx: true, control: 0x32))}";
+        await inspector.AnalyzeTextCommand.ExecuteAsync(null);
+
+        inspector.SelectedPacket = inspector.Packets[^1];
+
+        Assert.Equal("Полученное значение", inspector.SelectedField?.Field.Name);
+        Assert.False(inspector.SelectedField!.IsExpanded);
+        Assert.Collection(inspector.FieldPreview,
+            row => Assert.Equal(new("Полученное значение · Array (1 элемент)", 0), row),
+            row => Assert.Equal(new("[0] · Structure (2 элемента)", 1), row),
+            row => Assert.Equal(new("[0] · OctetString (12 байт)", 2), row),
+            row => Assert.Equal(new("HEX: 07EA0B12030A000000000000", 3, IsFormat: true), row),
+            row => Assert.StartsWith("DLMS date-time: 2026-11-18 10:00:00", row.Text),
+            row => Assert.Equal(new("[1] · UInt32: 1000 · 0x000003E8", 2), row));
+        Assert.Equal(2, inspector.SelectedField.Field.Ranges.Count);
+    }
+
+    [Fact]
+    public async Task SelectedField_OctetString_ShowsValidEncodingsAndStaysSelectedDuringHover()
+    {
+        using var inspector = new PacketInspectorViewModel(new DiagnosticTrace()) { SourceIndex = 1 };
+        inspector.InputText = "RX: C4 01 C1 00 09 03 41 42 43";
+        await inspector.AnalyzeTextCommand.ExecuteAsync(null);
+
+        var fields = inspector.Fields.SelectMany(f => f.Flatten()).ToArray();
+        var byteValue = fields.Single(f => f.Field.Name == "Значение");
+        inspector.SelectedField = byteValue;
+        var preview = inspector.FieldPreview;
+        Assert.Equal(
+            new[] { "Значение · OctetString (3 байт)", "HEX: 414243", "Windows-1251: ABC", "UTF-8: ABC", "ASCII: ABC" },
+            preview.Select(row => row.Text));
+
+        var length = fields.Single(f => f.Field.Name == "Длина");
+        inspector.HoverField(length);
+        Assert.Same(preview, inspector.FieldPreview);
+        Assert.Contains(length.Field.Name, inspector.ByteHighlightText);
+
+        inspector.SelectedField = length;
+        Assert.Equal("Длина: 3", Assert.Single(inspector.FieldPreview).Text);
+        inspector.SelectedPacket = null;
+        Assert.Empty(inspector.FieldPreview);
+    }
+
+    [Fact]
     public async Task HoverField_ObisField_HighlightsAllSixBytes()
     {
         // Arrange
