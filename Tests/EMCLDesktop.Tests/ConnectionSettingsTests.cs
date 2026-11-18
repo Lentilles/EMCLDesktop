@@ -200,6 +200,32 @@ public class ConnectionSettingsTests
         Assert.True(vm.HasStatusError, "Failed connection did not expose error-copy action");
     }
 
+    [Theory]
+    [InlineData("128", "17")]
+    [InlineData("1", "128")]
+    [InlineData("128", "")]
+    public async Task ToggleConnectionCommand_HdlcAddressAbove127_ExplainsHowToEnableExtendedAddress(
+        string serverAddress, string physicalAddress)
+    {
+        await using var vm = new MainViewModel
+        {
+            Host = "127.0.0.1",
+            TcpPort = "4059",
+            Framing = "HDLC",
+            ServerAddress = serverAddress,
+            ServerPhysicalAddress = physicalAddress,
+            ExtendedHdlcAddress = false
+        };
+
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasStatusError);
+        Assert.Contains("превышает 127", vm.Status);
+        Assert.Contains("В разделе «Адресация» включите «Расширенный HDLC-адрес»", vm.Status);
+        if (physicalAddress.Length == 0)
+            Assert.Contains("Укажите физический адрес HDLC", vm.Status);
+    }
+
     [Fact]
     public async Task Transport_SerialSelected_UpdatesVisibilityAndNotifies()
     {

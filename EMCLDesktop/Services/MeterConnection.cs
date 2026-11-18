@@ -51,7 +51,24 @@ public sealed record MeterConnectionOptions(
         if (Framing != "HDLC") throw new ArgumentException("Выберите Wrapper или HDLC.");
         ValidateHdlcRecovery(HdlcInformationFrameRetryCount, HdlcAcknowledgementTimeoutSeconds, RequestTimeoutSeconds);
         _ = HdlcNegotiation.CreateSnrmInformation(HdlcParameters);
-        return new ApduFraming.Hdlc(HdlcAddress.Client(checked((byte)ClientAddress)),
+
+        var clientAddress = HdlcAddress.Client(checked((byte)ClientAddress));
+        const int maxStandardAddress = 127;
+        const int maxExtendedAddress = 16383;
+        if (ServerAddress > maxExtendedAddress || ServerPhysicalAddress > maxExtendedAddress)
+            throw new ArgumentException($"Адрес сервера и физический адрес HDLC должны быть не больше {maxExtendedAddress}.");
+        if (!ExtendedHdlcAddress &&
+            (ServerAddress > maxStandardAddress || ServerPhysicalAddress > maxStandardAddress))
+        {
+            string address = ServerAddress > maxStandardAddress ? "Адрес сервера" : "Физический адрес HDLC";
+            string message = $"{address} превышает {maxStandardAddress}. " +
+                             "В разделе «Адресация» включите «Расширенный HDLC-адрес».";
+            if (ServerPhysicalAddress is null)
+                message += " Укажите физический адрес HDLC.";
+            throw new ArgumentException(message);
+        }
+
+        return new ApduFraming.Hdlc(clientAddress,
             HdlcAddress.Server(ServerAddress, ServerPhysicalAddress, ExtendedHdlcAddress),
             TimeSpan.FromSeconds(RequestTimeoutSeconds), trace is null ? null : trace.LogFrame)
         {
