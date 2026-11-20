@@ -376,14 +376,14 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
         int version = ++treeReadVersion;
         TreeReadCurrent = 0;
         TreeReadTotal = 0;
-        TreeReadProgressText = "Ожидание заголовка object_list…";
+        TreeReadProgressText = "Получение ответа object_list…";
         IsTreeReadInProgress = true;
         return new Progress<ObjectListProgress>(value =>
         {
             if (!IsTreeReadInProgress || version != treeReadVersion || OperationToken.IsCancellationRequested) return;
             TreeReadCurrent = value.Current;
             TreeReadTotal = value.Total;
-            TreeReadProgressText = $"Считано записей дерева: {value.Current} из {value.Total}";
+            TreeReadProgressText = $"Обработано записей дерева: {value.Current} из {value.Total}";
         });
     }
 
@@ -1150,9 +1150,18 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             operation.Token.ThrowIfCancellationRequested();
             ++selectionVersion;
             PopulateObjects(meter);
-            Status = $"Дерево обновлено: {Objects.Count} объектов" +
-                (meter.SkippedDuplicateEntries > 0
-                    ? $"; пропущено одинаковых записей: {meter.SkippedDuplicateEntries}" : "") + ".";
+            string status = $"Дерево обновлено: {Objects.Count} объектов.";
+            if (meter.SkippedDuplicateEntries > 0)
+                status += $" Пропущено одинаковых записей: {meter.SkippedDuplicateEntries}.";
+
+            var errors = meter.ObjectListErrors;
+            if (errors.Count > 0)
+            {
+                foreach (var (obis, error) in errors)
+                    trace.Add($"{obis}. {error.Replace('\n', ' ')}");
+                status += $" Ошибки в карточках объектов: {errors.Count}.";
+            }
+            Status = status;
         }
         catch (Exception) when (operation.IsCancellationRequested)
         {
@@ -1321,7 +1330,10 @@ public partial class MainViewModel : ViewModelBase, IAsyncDisposable
             var descriptor = obj.Descriptor;
             var rights = imported.Access.Rights[obj.LogicalName];
             var row = new MeterObjectViewModel(obj.LogicalName, descriptor.Key.ClassId,
-                descriptor.Key.ClassVersion, descriptor.IsKnown ? descriptor.Name : null);
+                descriptor.Key.ClassVersion, descriptor.IsKnown ? descriptor.Name : null)
+            {
+                ObjectListError = meter.ObjectListErrors.GetValueOrDefault(obj.LogicalName)
+            };
             previousObjects.TryGetValue((obj.LogicalName, row.ClassId, row.ClassVersion), out var previous);
             var definedAttributes = descriptor.IsKnown
                 ? descriptor.Attributes.ToDictionary(item => item.Index)

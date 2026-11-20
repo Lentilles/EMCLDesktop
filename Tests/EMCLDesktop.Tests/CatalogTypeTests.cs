@@ -10,8 +10,10 @@ using EMCL.Core.Codecs;
 using EMCL.Core.Objects;
 using EMCL.Core.Operations;
 using EMCL.Core.Values;
+using EMCL.Objects.Association;
 using EMCL.Protocol.Acse;
 using EMCL.Protocol.Apdu;
+using EMCL.Protocol.Axdr;
 using EMCL.Transport.Channels;
 using EMCLDesktop.Services;
 using EMCLDesktop.ViewModels;
@@ -213,6 +215,97 @@ public class CatalogTypeTests
         Assert.Equal(1, meterChannel.Gets);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadTreeAsync_MalformedAccess_KeepsObjectsAndShowsDiagnostics(bool useBlocks)
+    {
+        // Arrange
+        await using var vm = CreateViewModel();
+        var attributes = AttributeAccessList(2);
+        var methodIndex = DlmsValue.Number(DlmsType.Int8, 1);
+        var methodMode = DlmsValue.Number(DlmsType.Enum, 1);
+        var methods = DlmsValue.Array(DlmsValue.Structure(methodIndex, methodMode));
+        var malformedMethods = DlmsValue.Array(DlmsValue.Structure(methodIndex, methodMode, DlmsValue.Null));
+        var validRights = DlmsValue.Structure(attributes, methods);
+        var invalidRightsEntry = Register(0, DlmsValue.Structure());
+        var channel = new ObjectListChannel(
+            DlmsValue.Array(invalidRightsEntry, invalidRightsEntry,
+                Register(1, DlmsValue.Structure(attributes, malformedMethods)),
+                Register(2, DlmsValue.Structure(DlmsValue.Null, methods)), Register(3, validRights)), useBlocks);
+        var session = new DlmsClientSession(channel, new ClientSessionOptions());
+        await session.AssociateAsync();
+        await using var meter = CreateMeter(session, ignoreDuplicates: true);
+        typeof(MainViewModel).GetField("connection", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, meter);
+        vm.IsConnected = true;
+
+        // Act and verify the available objects and their permissions.
+        await vm.ReadTreeCommand.ExecuteAsync(null);
+        Assert.Equal(4, vm.Objects.Count);
+        var affected = Object(vm, Obis(0));
+        Assert.Equal("Register", affected.ClassName);
+        Assert.Contains("access_rights", affected.ObjectListError);
+        Assert.Contains("получено: 0", affected.ObjectListError);
+        Assert.False(Attribute(vm, Obis(0), 2).CanRead);
+        Assert.Contains("method_access, запись 1", Object(vm, Obis(1)).ObjectListError);
+        Assert.True(Attribute(vm, Obis(1), 2).CanRead);
+        Assert.NotEmpty(meter.InvokeUnavailableReason(3, LogicalName.Parse(Obis(1)), 1));
+        Assert.Contains("attribute_access", Object(vm, Obis(2)).ObjectListError);
+        Assert.Empty(meter.InvokeUnavailableReason(3, LogicalName.Parse(Obis(2)), 1));
+        Assert.Null(Object(vm, Obis(3)).ObjectListError);
+        Assert.True(Attribute(vm, Obis(3), 2).CanRead);
+        Assert.True(meter.IsActive);
+        Assert.Equal(1, channel.Gets);
+        Assert.Equal(useBlocks ? 1 : 0, channel.NextBlocks);
+        Assert.Equal(1, meter.SkippedDuplicateEntries);
+        Assert.Contains("Ошибки в карточках объектов: 3", vm.Status);
+        vm.SelectedTabIndex = 2;
+        Assert.Contains($"{affected.Obis}. {affected.ObjectListError}", vm.TraceText);
+
+        vm.SelectedObject = affected;
+        await vm.ReadAttributeAsync(Attribute(vm, Obis(0), 2));
+        Assert.Equal(42L, Attribute(vm, Obis(0), 2).LastReadValue!.AsInt64());
+
+        await using var saved = new MemoryStream();
+        await vm.SaveConfigurationAsync(saved);
+        saved.Position = 0;
+        await using var restored = CreateViewModel();
+        Assert.True(await restored.LoadConfigurationAsync(saved));
+        Assert.Equal(affected.ObjectListError, Object(restored, affected.Obis).ObjectListError);
+
+        channel.ObjectList = DlmsValue.Array(Register(0, validRights));
+        await vm.ReadTreeCommand.ExecuteAsync(null);
+        Assert.Null(Object(vm, affected.Obis).ObjectListError);
+        Assert.True(Attribute(vm, affected.Obis, 2).CanRead);
+
+        static DlmsValue Register(int index, DlmsValue rights) => Entry(3, 0, Obis(index), rights);
+    }
+
+    [Theory]
+    [InlineData(true, "Duplicate logical name")]
+    [InlineData(false, "Inconsistent versions of class")]
+    public async Task RefreshCatalogAsync_WithConflictingObjects_PreservesPreviousCatalog(bool duplicateObis, string message)
+    {
+        // Arrange
+        var first = Entry(3, 0, Obis(0), 2);
+        var conflicting = duplicateObis ? Entry(3, 0, Obis(0), 3) : Entry(3, 1, Obis(1), 2);
+        var channel = new ObjectListChannel(DlmsValue.Array(first));
+        var session = new DlmsClientSession(channel, new ClientSessionOptions());
+        await session.AssociateAsync();
+        await using var meter = CreateMeter(session, ignoreDuplicates: true);
+        await meter.RefreshCatalogAsync();
+        var previous = meter.Association;
+        channel.ObjectList = DlmsValue.Array(first, conflicting);
+
+        // Act
+        var error = await Assert.ThrowsAsync<AssociationImportException>(() => meter.RefreshCatalogAsync());
+
+        // Assert
+        Assert.Contains(message, error.Message);
+        Assert.Same(previous, meter.Association);
+        Assert.True(meter.IsActive);
+    }
+
     [Fact]
     public async Task LoadConfigurationAsync_LegacyCatalog_RecoversMetadataAndPreservesObservedTypes()
     {
@@ -247,11 +340,11 @@ public class CatalogTypeTests
     private static MainViewModel CreateViewModel() =>
         new() { Host = "127.0.0.1", TcpPort = "4059", Framing = "Wrapper" };
 
-    private static MeterConnection CreateMeter(DlmsClientSession session)
+    private static MeterConnection CreateMeter(DlmsClientSession session, bool ignoreDuplicates = false)
     {
         var options = new MeterConnectionOptions("test", 1, "Wrapper", 16, 1, null, false, 1,
             "0.0.40.0.0.255", ClientAuthentication.None, "", "UTF-8", 1, 1, 3600, 1024,
-            LnAssociationOptions.SupportedConformance, false, new ProtocolLimits());
+            LnAssociationOptions.SupportedConformance, ignoreDuplicates, new ProtocolLimits());
         return (MeterConnection)Activator.CreateInstance(typeof(MeterConnection),
             BindingFlags.Instance | BindingFlags.NonPublic, null,
             [session, ClientAuthentication.None, LogicalName.Parse(options.AssociationObis), TimeSpan.FromHours(1), options], null)!;
@@ -267,12 +360,16 @@ public class CatalogTypeTests
         await vm.LoadConfigurationAsync(stream);
     }
 
-    private static DlmsValue Entry(ushort classId, byte version, string obis, params sbyte[] indices) => DlmsValue.Structure(
+    private static DlmsValue Entry(ushort classId, byte version, string obis, params sbyte[] indices) =>
+        Entry(classId, version, obis, DlmsValue.Structure(AttributeAccessList(indices), DlmsValue.Array()));
+
+    private static DlmsValue Entry(ushort classId, byte version, string obis, DlmsValue rights) => DlmsValue.Structure(
         DlmsValue.Number(DlmsType.UInt16, classId), DlmsValue.Number(DlmsType.UInt8, version),
-        DlmsValue.Octets(LogicalName.Parse(obis).ToBytes()),
-        DlmsValue.Structure(DlmsValue.Array(indices.Select(index => DlmsValue.Structure(
-            DlmsValue.Number(DlmsType.Int8, index), DlmsValue.Number(DlmsType.Enum, 1), DlmsValue.Null)).ToArray()),
-            DlmsValue.Array()));
+        DlmsValue.Octets(LogicalName.Parse(obis).ToBytes()), rights);
+
+    private static DlmsValue AttributeAccessList(params sbyte[] indices) =>
+        DlmsValue.Array(indices.Select(index => DlmsValue.Structure(
+            DlmsValue.Number(DlmsType.Int8, index), DlmsValue.Number(DlmsType.Enum, 1), DlmsValue.Null)).ToArray());
 
     private static void Import(MainViewModel vm, MeterConnection meter, params DlmsValue[] entries)
     {
@@ -305,11 +402,14 @@ public class CatalogTypeTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class ObjectListChannel(DlmsValue list) : IApduChannel
+    private sealed class ObjectListChannel(DlmsValue list, bool useBlocks = false) : IApduChannel
     {
         private readonly ApduCodec codec = new();
         private readonly Channel<ReadOnlyMemory<byte>> responses = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        private byte[] remainingBlock = [];
+        public DlmsValue ObjectList { get; set; } = list;
         public int Gets { get; private set; }
+        public int NextBlocks { get; private set; }
 
         public ValueTask SendAsync(ReadOnlyMemory<byte> apdu, CancellationToken cancellationToken = default)
         {
@@ -321,9 +421,25 @@ public class CatalogTypeTests
                     reply = AcseApdu.Aare(codec.EncodeBytes(new InitiateResponse(null, DlmsNegotiation.Version6,
                         (uint)(LnAssociationOptions.SupportedConformance & ~DlmsConformance.PriorityManagement), 1024)));
                     break;
-                case LnRequest ln when ln.Operation.Kind == CosemOperationKind.Read:
+                case LnRequest ln when ln.Operation.Kind == CosemOperationKind.Read &&
+                    ln.Operation.ClassId == CosemClassIds.AssociationLn:
                     Gets++;
-                    reply = new LnResponse(ln.Operation.Kind, ln.InvokeIdAndPriority, OperationResult.Ok(list));
+                    if (!useBlocks)
+                    {
+                        reply = new LnResponse(ln.Operation.Kind, ln.InvokeIdAndPriority, OperationResult.Ok(ObjectList));
+                        break;
+                    }
+                    var bytes = new AxdrCodec().EncodeBytes(ObjectList);
+                    remainingBlock = bytes[9..];
+                    reply = new GetBlockResponse(ln.InvokeIdAndPriority, false, 1, [.. bytes.AsSpan(0, 9)]);
+                    break;
+                case GetNextRequest next when next.BlockNumber == 1:
+                    NextBlocks++;
+                    reply = new GetBlockResponse(next.InvokeIdAndPriority, true, 2, [.. remainingBlock]);
+                    break;
+                case LnRequest ln when ln.Operation.Kind == CosemOperationKind.Read:
+                    reply = new LnResponse(ln.Operation.Kind, ln.InvokeIdAndPriority,
+                        OperationResult.Ok(DlmsValue.Number(DlmsType.UInt16, 42)));
                     break;
                 case AcseApdu { Kind: AcseKind.Rlrq }:
                     reply = AcseApdu.Release(response: true);

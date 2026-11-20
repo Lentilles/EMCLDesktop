@@ -142,6 +142,8 @@ public sealed class MeterConnection : IAsyncDisposable
     public ImportedAssociation? Association { get; private set; }
     public bool IsActive => session.State == ClientSessionState.Associated;
     public int SkippedDuplicateEntries { get; private set; }
+    internal ImmutableDictionary<LogicalName, string> ObjectListErrors { get; private set; } =
+        ImmutableDictionary<LogicalName, string>.Empty;
     public event Action<MeterConnection, Exception>? KeepAliveFailed;
 
     private MeterConnection(DlmsClientSession session, ClientAuthentication authentication,
@@ -453,48 +455,22 @@ public sealed class MeterConnection : IAsyncDisposable
         await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var (imported, skipped) = await ReadCatalogAsync(session, options, associationName,
-                progress, cancellationToken).ConfigureAwait(false);
+            // GET decodes the A-XDR array before applying the Association LN schema.
+            var list = await session.GetAsync(CosemClassIds.AssociationLn, associationName,
+                AssociationLnMembers.Attributes.ObjectList, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var (imported, skipped, errors) = AssociationCatalogReader.Import(list, options.AssociationVersion,
+                options.IgnoreIdenticalObjectListEntries, options.Limits, progress, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             Association = imported;
             SkippedDuplicateEntries = skipped;
+            ObjectListErrors = errors;
             Volatile.Write(ref lastActivityTimestamp, Stopwatch.GetTimestamp());
-            return imported.Catalog.Objects.Count();
+            return imported.Access.Rights.Count;
         }
         finally
         {
             operationGate.Release();
         }
-    }
-
-    private static async Task<(ImportedAssociation Association, int Skipped)> ReadCatalogAsync(
-        DlmsClientSession session, MeterConnectionOptions options, LogicalName associationName,
-        IProgress<ObjectListProgress>? progress, CancellationToken cancellationToken)
-    {
-        var importer = CatalogDefinitions.CreateImporter(options.Limits);
-        await using var stream = await session.OpenObjectListAsync(importer,
-            options.AssociationVersion, associationName, cancellationToken).ConfigureAwait(false);
-        var entries = new List<DlmsValue>(stream.TotalCount);
-        progress?.Report(new ObjectListProgress(0, stream.TotalCount));
-        var lastReport = Stopwatch.GetTimestamp();
-        await foreach (var entry in stream.WithCancellation(cancellationToken).ConfigureAwait(false))
-        {
-            entries.Add(entry.RawValue);
-            if (stream.CurrentCount != stream.TotalCount &&
-                Stopwatch.GetElapsedTime(lastReport) < TimeSpan.FromMilliseconds(50))
-                continue;
-            progress?.Report(new ObjectListProgress(stream.CurrentCount, stream.TotalCount));
-            lastReport = Stopwatch.GetTimestamp();
-        }
-
-        var list = DlmsValue.Array([.. entries]);
-        int skipped = 0;
-        if (options.IgnoreIdenticalObjectListEntries)
-        {
-            var filtered = IdenticalObjectListDuplicateFilter.Apply(list, options.Limits);
-            list = filtered.Value;
-            skipped = filtered.SkippedCount;
-        }
-        return (importer.Import(list, "meter", "current", options.AssociationVersion), skipped);
     }
 
     private async Task RunKeepAliveAsync()

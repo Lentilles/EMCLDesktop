@@ -28,6 +28,8 @@ public sealed partial class MeterObjectViewModel(LogicalName logicalName, ushort
     public ushort ClassId { get; } = classId;
     public byte ClassVersion { get; } = classVersion;
     public string ClassName { get; } = className ?? UnknownClassName;
+    public string? ObjectListError { get; init; }
+    public bool HasObjectListError => !string.IsNullOrWhiteSpace(ObjectListError);
     public string Title => $"{Obis}  ·  {ClassName}";
     public bool IsProfileGeneric => ClassId == CosemClassIds.ProfileGeneric;
     [ObservableProperty]

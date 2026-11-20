@@ -5,6 +5,9 @@
              xmlns:views="using:EMCLDesktop.Views"
              x:Class="EMCLDesktop.Views.MainView"
              x:DataType="vm:MainViewModel">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="ObjectListWarningBrush" Color="#FFBC77" />
+    </UserControl.Resources>
     <UserControl.Styles>
         <StyleInclude Source="/Styles/CommonStyles.axaml" />
         <Style Selector="ToggleButton.regex-toggle">
@@ -294,7 +297,12 @@
                                                         <Button Classes="object-row"
                                                                 Classes.selected="{Binding IsSelected}"
                                                                 Click="SelectObjectClick">
-                                                            <TextBlock Text="{Binding Obis}" FontSize="12" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <TextBlock Text="{Binding Obis}" FontSize="12" />
+                                                                <TextBlock Text="!" Foreground="{StaticResource ObjectListWarningBrush}" FontWeight="Bold" FontSize="12"
+                                                                           IsVisible="{Binding HasObjectListError}"
+                                                                           ToolTip.Tip="{Binding ObjectListError}" />
+                                                            </StackPanel>
                                                         </Button>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
@@ -315,18 +323,23 @@
                             <ContentControl.ContentTemplate>
                                 <DataTemplate x:DataType="vm:MeterObjectViewModel">
                                     <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
-                                        <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Obis}" FontSize="24" FontWeight="SemiBold"
-                                                       Foreground="#F4F7FC" Margin="0,0,14,0" VerticalAlignment="Center" />
-                                            <TextBlock Text="{Binding ClassName}" Foreground="#69C4E1"
-                                                       Margin="0,0,14,0" VerticalAlignment="Center" />
-                                            <TextBlock Classes="muted" FontSize="12"
-                                                       Text="{Binding ClassId, StringFormat='Класс {0}'}"
-                                                       Margin="0,0,8,0" VerticalAlignment="Center" />
-                                            <TextBlock Classes="muted" FontSize="12"
-                                                       Text="{Binding ClassVersion, StringFormat='Версия {0}'}"
-                                                       VerticalAlignment="Center" />
-                                        </WrapPanel>
+                                        <StackPanel Spacing="6">
+                                            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Obis}" FontSize="24" FontWeight="SemiBold"
+                                                           Foreground="#F4F7FC" Margin="0,0,14,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding ClassName}" Foreground="#69C4E1"
+                                                           Margin="0,0,14,0" VerticalAlignment="Center" />
+                                                <TextBlock Classes="muted" FontSize="12"
+                                                           Text="{Binding ClassId, StringFormat='Класс {0}'}"
+                                                           Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                <TextBlock Classes="muted" FontSize="12"
+                                                           Text="{Binding ClassVersion, StringFormat='Версия {0}'}"
+                                                           VerticalAlignment="Center" />
+                                            </WrapPanel>
+                                            <SelectableTextBlock Text="{Binding ObjectListError}" TextWrapping="Wrap"
+                                                                 Foreground="{StaticResource ObjectListWarningBrush}" FontSize="12"
+                                                                 IsVisible="{Binding HasObjectListError}" />
+                                        </StackPanel>
                                         <TabStrip Grid.Row="1" IsVisible="{Binding IsProfileGeneric}"
                                                   SelectedIndex="{Binding ProfileModeIndex, Mode=TwoWay}"
                                                   AutomationProperties.Name="Режим Profile Generic">

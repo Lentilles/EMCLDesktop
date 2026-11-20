@@ -19,13 +19,16 @@ internal static class SavedConfiguration
     };
 
     public static SavedCatalog CaptureCatalog(IEnumerable<MeterObjectViewModel> objects) =>
-        new(objects.Select(obj => new SavedObject(obj.Obis, obj.ClassId, obj.ClassVersion,
-            obj.ClassName,
-            obj.Attributes.Select(attribute => new SavedAttribute(attribute.Index, attribute.Name,
+        new(objects.Select(obj =>
+        {
+            var attributes = obj.Attributes.Select(attribute => new SavedAttribute(attribute.Index, attribute.Name,
                 attribute.Type, attribute.HasDeclaredType, attribute.Access, attribute.CanRead,
-                attribute.Value)).ToArray(),
-            obj.Methods.Select(method => new SavedMethod(method.Index, method.Name,
-                method.ParameterType, method.Access)).ToArray())).ToArray());
+                attribute.Value)).ToArray();
+            var methods = obj.Methods.Select(method => new SavedMethod(method.Index, method.Name,
+                method.ParameterType, method.Access)).ToArray();
+            return new SavedObject(obj.Obis, obj.ClassId, obj.ClassVersion, obj.ClassName,
+                attributes, methods, obj.ObjectListError);
+        }).ToArray());
 
     public static MeterObjectViewModel[] RestoreCatalog(SavedCatalog catalog)
     {
@@ -44,7 +47,10 @@ internal static class SavedConfiguration
                 ? CatalogDefinitions.Find(saved.ClassId, saved.ClassVersion)
                 : null;
             var obj = new MeterObjectViewModel(logicalName, saved.ClassId,
-                saved.ClassVersion, definition?.Name ?? saved.ClassName);
+                saved.ClassVersion, definition?.Name ?? saved.ClassName)
+            {
+                ObjectListError = saved.ObjectListError
+            };
             foreach (var item in saved.Attributes)
             {
                 if (item is null)
@@ -83,7 +89,7 @@ internal static class SavedConfiguration
 
 internal sealed record SavedCatalog(SavedObject[] Objects);
 internal sealed record SavedObject(string Obis, ushort ClassId, byte ClassVersion, string? ClassName,
-    SavedAttribute[] Attributes, SavedMethod[] Methods);
+    SavedAttribute[] Attributes, SavedMethod[] Methods, string? ObjectListError = null);
 internal sealed record SavedAttribute(sbyte Index, string? Name, string? Type, bool HasDeclaredType,
     string? Access, bool CanRead, string? Value);
 internal sealed record SavedMethod(sbyte Index, string? Name, string? ParameterType, string? Access);
