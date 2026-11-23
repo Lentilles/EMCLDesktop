@@ -85,6 +85,7 @@ internal sealed class VelopackUpdateService : IDesktopUpdates
         {
             foreach (var process in processes) process.Dispose();
         }
-        manager.WaitExitThenApplyUpdates(pending, silent: true, restart: true, restartArgs: restartArgs);
+        // Velopack may need to ask for administrator approval to replace the macOS app bundle.
+        manager.WaitExitThenApplyUpdates(pending, silent: !OperatingSystem.IsMacOS(), restart: true, restartArgs: restartArgs);
     }
 }
