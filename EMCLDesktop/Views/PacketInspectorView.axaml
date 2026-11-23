@@ -246,7 +246,8 @@
                 <TextBlock Text="Структура пакета" Classes="section-title" FontSize="16" />
                 <TreeView x:Name="InspectorFieldsTree" Grid.Row="1" ItemsSource="{Binding Fields}" SelectedItem="{Binding SelectedField, Mode=TwoWay}"
                           Background="Transparent" BorderThickness="0" MinHeight="100"
-                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.AllowAutoHide="False">
                     <TreeView.ItemTemplate>
                         <TreeDataTemplate x:DataType="vm:InspectorFieldViewModel" ItemsSource="{Binding Children}">
                             <Border Classes="field" Classes.highlighted="{Binding IsHighlighted}" Classes.error="{Binding IsError}"
@@ -260,10 +261,11 @@
         </Border>
         <GridSplitter Grid.Column="3" Classes="workspace-divider" ResizeDirection="Columns" />
         <Border Grid.Column="4" Classes="workspace-content">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" RowSpacing="8" SizeChanged="PacketDetailsSizeChanged">
+            <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="8">
                 <StackPanel Spacing="2">
                     <TextBlock Text="{Binding PacketTitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding PacketOrigin}" Classes="muted" FontSize="11" />
+                    <TextBlock Text="{Binding PacketOrigin}" Classes="muted" FontSize="11"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                     <TextBlock Text="{Binding BytePageText}" Classes="muted" FontSize="11" VerticalAlignment="Center" />
@@ -272,71 +274,80 @@
                     <Button Grid.Column="2" Classes="secondary" Content="→" Command="{Binding NextBytePageCommand}" IsEnabled="{Binding CanNextPage}"
                             ToolTip.Tip="Следующие 256 байт" Padding="10,4" />
                 </Grid>
-                <ScrollViewer x:Name="PacketBytesScroll" Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding ByteRows}">
+                <Grid Grid.Row="2" RowDefinitions="Auto,Auto,*" RowSpacing="8" SizeChanged="PacketContentSizeChanged">
+                    <ScrollViewer x:Name="PacketBytesScroll" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto" AllowAutoHide="False">
+                        <ItemsControl ItemsSource="{Binding ByteRows}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:InspectorByteRow">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock Text="{Binding Offset}" FontFamily="monospace" FontSize="12" Foreground="#ACBED3"
+                                                   VerticalAlignment="Center" Width="52" />
+                                        <ItemsControl ItemsSource="{Binding Bytes}">
+                                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:InspectorByteViewModel">
+                                                    <Button Content="{Binding Hex}" Classes="hex-byte" Classes.highlighted="{Binding IsHighlighted}"
+                                                            Classes.error="{Binding IsError}"
+                                                            ToolTip.Tip="{Binding Description}" AutomationProperties.Name="{Binding Description}"
+                                                            PointerEntered="BytePointerEntered" PointerExited="BytePointerExited"
+                                                            GotFocus="ByteGotFocus" LostFocus="ByteLostFocus" Click="ByteClick" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="1" IsVisible="{Binding HasPacket}" Text="{Binding ByteHighlightText}"
+                               ToolTip.Tip="{Binding ByteHighlightText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                               Classes="muted" FontSize="11" />
+                    <Border Grid.Row="2" IsVisible="{Binding HasFieldPreview}"
+                            BorderBrush="{StaticResource WorkspaceDividerBrush}" BorderThickness="0,1,0,0" Padding="0,5,0,0">
+                        <ListBox x:Name="FieldPreviewList" ItemsSource="{Binding FieldPreview}" Background="Transparent"
+                                 BorderThickness="0" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.AllowAutoHide="False"
+                                 AutomationProperties.Name="Значения выбранного поля">
+                            <ListBox.Styles>
+                                <Style Selector="ListBoxItem">
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="Padding" Value="0,2" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                                <Style Selector="SelectableTextBlock.muted">
+                                    <Setter Property="Foreground" Value="#ACBED3" />
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:InspectorFieldPreviewRow">
+                                    <SelectableTextBlock Text="{Binding Text}" Margin="{Binding Indent}" Classes.muted="{Binding IsFormat}"
+                                                         FontFamily="monospace" FontSize="12" TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </Grid>
+                <ScrollViewer x:Name="RelatedPacketsScroll" Grid.Row="3" MaxHeight="76"
+                              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" AllowAutoHide="False"
+                              AutomationProperties.Name="Связанные пакеты">
+                    <ItemsControl ItemsSource="{Binding RelatedPackets}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:InspectorByteRow">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <TextBlock Text="{Binding Offset}" FontFamily="monospace" FontSize="12" Foreground="#ACBED3"
-                                               VerticalAlignment="Center" Width="52" />
-                                    <ItemsControl ItemsSource="{Binding Bytes}">
-                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:InspectorByteViewModel">
-                                                <Button Content="{Binding Hex}" Classes="hex-byte" Classes.highlighted="{Binding IsHighlighted}"
-                                                        Classes.error="{Binding IsError}"
-                                                        ToolTip.Tip="{Binding Description}" AutomationProperties.Name="{Binding Description}"
-                                                        PointerEntered="BytePointerEntered" PointerExited="BytePointerExited"
-                                                        GotFocus="ByteGotFocus" LostFocus="ByteLostFocus" Click="ByteClick" />
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
+                            <DataTemplate x:DataType="vm:RelatedPacketViewModel">
+                                <Button Classes="secondary" Content="{Binding Title}" Click="RelatedPacketClick" Padding="8,4" Margin="0,0,6,0" FontSize="12" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-                <TextBlock Grid.Row="3" IsVisible="{Binding HasPacket}" Text="{Binding ByteHighlightText}"
-                           ToolTip.Tip="{Binding ByteHighlightText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                           Classes="muted" FontSize="11" />
-                <Border Grid.Row="4" IsVisible="{Binding HasFieldPreview}"
-                        BorderBrush="{StaticResource WorkspaceDividerBrush}" BorderThickness="0,1,0,0" Padding="0,5,0,0">
-                    <ListBox x:Name="FieldPreviewList" ItemsSource="{Binding FieldPreview}" Background="Transparent"
-                             BorderThickness="0" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             AutomationProperties.Name="Значения выбранного поля">
-                        <ListBox.Styles>
-                            <Style Selector="ListBoxItem">
-                                <Setter Property="MinHeight" Value="0" />
-                                <Setter Property="Padding" Value="0,2" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            </Style>
-                            <Style Selector="SelectableTextBlock.muted">
-                                <Setter Property="Foreground" Value="#ACBED3" />
-                            </Style>
-                        </ListBox.Styles>
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:InspectorFieldPreviewRow">
-                                <SelectableTextBlock Text="{Binding Text}" Margin="{Binding Indent}" Classes.muted="{Binding IsFormat}"
-                                                     FontFamily="monospace" FontSize="12" TextWrapping="Wrap" />
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Border>
-                <ItemsControl Grid.Row="5" ItemsSource="{Binding RelatedPackets}">
-                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:RelatedPacketViewModel">
-                            <Button Classes="secondary" Content="{Binding Title}" Click="RelatedPacketClick" Padding="8,4" Margin="0,0,6,0" FontSize="12" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <Grid Grid.Row="6" RowDefinitions="Auto,Auto" RowSpacing="6" IsVisible="{Binding HasPacket}">
+                <Grid Grid.Row="4" RowDefinitions="Auto,Auto" RowSpacing="6" IsVisible="{Binding HasPacket}">
                     <TextBlock Text="Исходный текст" FontWeight="SemiBold" FontSize="12" />
                     <TextBox Grid.Row="1" Classes="analysis-log" Text="{Binding PacketSource}" IsReadOnly="True" AcceptsReturn="True"
                              TextWrapping="NoWrap" FontFamily="monospace" FontSize="12" MinHeight="70" MaxHeight="120"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"
                              Background="#0D1726" BorderBrush="#536F8B" BorderThickness="1" Foreground="#E7EFF8" Padding="8" />
                 </Grid>
             </Grid>

@@ -226,10 +226,10 @@ public partial class PacketInspectorView : UserControl
         }, DispatcherPriority.Background);
     }
 
-    private void PacketDetailsSizeChanged(object? sender, SizeChangedEventArgs e)
+    private void PacketContentSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         // A short hex page uses its natural height. A full page leaves space for the field preview.
-        PacketBytesScroll.MaxHeight = e.NewSize.Height * 0.4;
+        PacketBytesScroll.MaxHeight = e.NewSize.Height * 0.55;
     }
 
     private void FieldPointerEntered(object? sender, PointerEventArgs e)
@@ -253,7 +253,7 @@ public partial class PacketInspectorView : UserControl
     private void ByteLostFocus(object? sender, RoutedEventArgs e) => Inspector?.HoverByte(null);
     private void RevealField(InspectorFieldViewModel? field)
     {
-        if (field is null) return;
+        if (field is null || field.Parent is { IsExpanded: false }) return;
         Dispatcher.UIThread.Post(() =>
         {
             InspectorFieldsTree.GetVisualDescendants().OfType<TreeViewItem>()

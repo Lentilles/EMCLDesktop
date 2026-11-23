@@ -29,6 +29,7 @@ public sealed record InspectedPacket(long Id, string Direction, string Timestamp
 {
     internal const string AssembledHdlcFraming = "Собранный HDLC APDU";
     internal const string AssembledValueFraming = "Собранное DLMS-значение";
+    internal const string AssemblySourcesFieldName = "Исходные пакеты";
 
     public string Kind { get; init; } = "Неизвестные данные";
     public string Diagnostic { get; init; } = "";

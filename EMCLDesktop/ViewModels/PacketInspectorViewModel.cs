@@ -12,6 +12,7 @@ public sealed partial class PacketItemViewModel(InspectedPacket packet) : Observ
     public InspectedPacket Packet { get; private set; } = packet;
     private string? AssemblyTitle => Packet.Framing switch
     {
+        InspectedPacket.AssembledHdlcFraming when Packet.Kind != Packet.Framing => $"Полный PDU · {Packet.Kind}",
         InspectedPacket.AssembledHdlcFraming => "Полный PDU",
         InspectedPacket.AssembledValueFraming => InspectedPacket.AssembledValueFraming,
         _ => null
@@ -44,12 +45,15 @@ public sealed partial class InspectorFieldViewModel : ObservableObject
     public string Label => Field.Label;
     public bool IsError => Field.IsError;
     public IReadOnlyList<InspectorFieldViewModel> Children { get; }
+    internal int ByteCount { get; }
+    internal bool IsAssemblySource => Parent?.Field.Name == InspectedPacket.AssemblySourcesFieldName;
     [ObservableProperty] public partial bool IsHighlighted { get; set; }
     [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
 
     public InspectorFieldViewModel(InspectionField field, InspectorFieldViewModel? parent = null)
     {
         Field = field; Parent = parent;
+        ByteCount = field.ByteCount;
         IsExpanded = parent is null;
         Children = field.Children.Select(child => new InspectorFieldViewModel(child, this)).ToArray();
     }
@@ -376,7 +380,12 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         Fields.Clear(); RelatedPackets.Clear();
         if (SelectedPacket is { } selected)
         {
-            foreach (var field in selected.Packet.Fields) Fields.Add(new(field));
+            InspectionField? assemblySources = null;
+            foreach (var field in selected.Packet.Fields)
+            {
+                if (field.Name == InspectedPacket.AssemblySourcesFieldName) assemblySources = field;
+                else Fields.Add(new(field));
+            }
             // Correlated OBIS and scaled values may not be present in the response's own wire fields.
             // Keep that information in the structure without inventing byte ranges for request metadata.
             var wireFields = Fields.SelectMany(f => f.Flatten()).ToArray();
@@ -391,6 +400,8 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
             if (context.Count > 0) Fields.Add(new(new("Контекст обмена", "", [], context)) { IsExpanded = true });
             if (!string.IsNullOrEmpty(selected.Packet.Diagnostic))
                 Fields.Add(new(new("Диагностика", selected.Packet.Diagnostic, [], [])));
+            if (assemblySources is not null)
+                Fields.Add(new(assemblySources) { IsExpanded = false });
             var availablePacketIds = selected.Packet.RelatedPacketIds.Count > 0
                 ? Packets.Select(packet => packet.Packet.Id).ToHashSet() : null;
             foreach (long id in selected.Packet.RelatedPacketIds)
@@ -400,12 +411,12 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
         flatFields = Fields.SelectMany(f => f.Flatten()).ToArray();
         errorRanges = flatFields.Where(field => field.IsError).SelectMany(field => field.Field.Ranges).ToArray();
         byteOwners = new InspectorFieldViewModel?[SelectedPacket?.Packet.Bytes.Length ?? 0];
-        // Later, smaller fields own their bytes; no search through a large tree is needed on hover.
+        // Prefer the most specific protocol field, using the source frame for unparsed bytes.
         foreach (var field in flatFields)
         {
             foreach (var range in field.Field.Ranges)
                 for (int offset = Math.Max(0, range.Offset); offset < Math.Min(byteOwners.Length, range.Offset + range.Length); offset++)
-                    if (byteOwners[offset] is not { } owner || field.Field.ByteCount <= owner.Field.ByteCount)
+                    if (byteOwners[offset] is not { } owner || !field.IsAssemblySource && field.ByteCount <= owner.ByteCount)
                         byteOwners[offset] = field;
         }
         SelectedField = previous is null ? null : FindField(previous);
@@ -446,7 +457,7 @@ public sealed partial class PacketInspectorViewModel : ObservableObject, IDispos
     }
     public void HoverByte(InspectorByteViewModel? value)
     {
-        if (value?.Owner is { } field)
+        if (value?.Owner is { IsAssemblySource: false } field)
             for (var parent = field.Parent; parent is not null; parent = parent.Parent) parent.IsExpanded = true;
         HoverField(value?.Owner);
     }

@@ -714,14 +714,14 @@ public sealed class PacketAnalyzer
         var raw = new byte[total];
         var data = new List<byte>();
         var offsets = new List<int>();
-        var fields = new List<InspectionField>();
+        var sourceFields = new List<InspectionField>(parts.Count);
         int shift = 0;
         foreach (var part in parts)
         {
             part.Packet.Bytes.CopyTo(raw, shift);
             data.AddRange(part.Payload.Bytes);
             offsets.AddRange(part.Payload.Offsets.Select(offset => offset + shift));
-            fields.Add(InspectionField.At($"Исходный пакет № {part.Packet.Id}", part.Packet.Kind, shift, part.Packet.Bytes.Length));
+            sourceFields.Add(InspectionField.At($"Исходный пакет № {part.Packet.Id}", part.Packet.Kind, shift, part.Packet.Bytes.Length));
             shift += part.Packet.Bytes.Length;
         }
         long id = NewId();
@@ -731,7 +731,9 @@ public sealed class PacketAnalyzer
             string.Join("; ", parts.Select(p => p.Packet.Origin).Distinct()),
             string.Join(Environment.NewLine, parts.Select(p => p.Packet.SourceText).Distinct()))
         {
-            Kind = kind, Fields = fields, RelatedPacketIds = sourceIds, AssemblySourcePacketIds = sourceIds,
+            Kind = kind,
+            Fields = [new(InspectedPacket.AssemblySourcesFieldName, parts.Count.ToString(CultureInfo.InvariantCulture), [], sourceFields)],
+            RelatedPacketIds = sourceIds, AssemblySourcePacketIds = sourceIds,
             Diagnostic = "Байты исходных пакетов показаны последовательно; поля могут занимать несколько диапазонов."
         };
         return (packet, new(data.ToArray(), offsets.ToArray()));

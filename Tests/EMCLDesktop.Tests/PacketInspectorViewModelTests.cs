@@ -58,6 +58,12 @@ public class PacketInspectorViewModelTests
 
         inspector.SelectedPacket = inspector.Packets[^1];
 
+        Assert.EndsWith("Полный PDU · GET response", inspector.PacketTitle);
+        Assert.Contains(inspector.Fields.Take(inspector.Fields.Count - 1), field => field.Field.Name == "DLMS");
+        var sources = inspector.Fields[^1];
+        Assert.Equal("Исходные пакеты: 2", sources.Label);
+        Assert.False(sources.IsExpanded);
+        Assert.Equal(new long[] { 1, 2 }, inspector.RelatedPackets.Select(packet => packet.Id));
         Assert.Equal("Полученное значение", inspector.SelectedField?.Field.Name);
         Assert.False(inspector.SelectedField!.IsExpanded);
         Assert.Collection(inspector.FieldPreview,
@@ -68,6 +74,13 @@ public class PacketInspectorViewModelTests
             row => Assert.StartsWith("DLMS date-time: 2026-11-18 10:00:00", row.Text),
             row => Assert.Equal(new("[1] · UInt32: 1000 · 0x000003E8", 2), row));
         Assert.Equal(2, inspector.SelectedField.Field.Ranges.Count);
+
+        var frameFlag = inspector.ByteRows.SelectMany(row => row.Bytes).First();
+        Assert.Same(sources.Children[0], frameFlag.Owner);
+        inspector.HoverByte(frameFlag);
+        Assert.False(sources.IsExpanded);
+        inspector.SelectByte(frameFlag);
+        Assert.True(sources.IsExpanded);
     }
 
     [Fact]
