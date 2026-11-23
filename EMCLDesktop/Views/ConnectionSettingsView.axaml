@@ -275,7 +275,7 @@
                                        Classes="field-label" TextWrapping="Wrap" />
                             <ComboBox ItemsSource="{Binding HdlcRetryCounts}"
                                       SelectedItem="{Binding HdlcInformationFrameRetryCount}"
-                                      ToolTip.Tip="0 отключает повторы. При 1 приложение проверяет подтверждение через RR."
+                                      ToolTip.Tip="0 отключает восстановление по таймауту. При 1 клиент опрашивает счётчик через RR и повторяет исходящий I-кадр, если счётчик всё ещё ждёт его номер. После подтверждения AARQ клиент через RR запрашивает задержанный AARE."
                                       HorizontalAlignment="Stretch" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Spacing="5">

@@ -38,7 +38,7 @@ On macOS, the **EMCL Desktop** application menu also includes About and Connecti
 
 ## Running from source
 
-.NET SDK 10 is required. The application uses the EMCL 0.4.0 NuGet package, pinned in `Directory.Packages.props`.
+.NET SDK 10 is required. The EMCL NuGet package version is pinned in `Directory.Packages.props`.
 
 Run these commands from the `EMCLDesktop` repository root:
 
@@ -146,9 +146,9 @@ JSON profiles store these settings as `association.useHighPriority` and `associa
 
 Serial uses direct binary communication at the configured baud rate, without an initial IEC 62056-21 exchange or baud rate switching. Hardware handshaking controls RTS automatically. TCP and Serial settings remain in their fields when switching transports; JSON stores the settings for the selected transport.
 
-The **No traffic** setting specifies the maximum idle interval without bytes being read or written. Each received fragment and each send resets the timer, so a complete request may take longer than this interval.
+**Connection timeout** limits opening the TCP connection or serial port. **No traffic** limits each pending transport read or write, as well as the HDLC SNRM/UA exchange. Each received fragment starts a fresh read, so a complete DLMS exchange may take longer than this interval.
 
-For HDLC, set **Unacknowledged frame retries** to `1` to enable recovery. After the acknowledgement timeout (1 second by default), EMCL polls the meter with RR and resends the I-frame only if the meter still expects it. This applies to association setup and subsequent I-frames. **No traffic** must exceed three acknowledgement intervals. Both settings are saved in JSON. Retries default to `0`, including when loading older configurations.
+For HDLC, set **Unacknowledged frame retries** to `1` to enable recovery. After the acknowledgement timeout (1 second by default), EMCL polls the meter with RR and resends the I-frame only if the meter still expects it. If the meter acknowledges AARQ with RR and delays AARE, EMCL also polls for the pending AARE. **No traffic** must exceed three acknowledgement intervals. Both settings are saved in JSON. Retries default to `0`, including when loading older configurations.
 
 **Negotiate MAX TX / MAX RX** (`Согласовывать MAX TX / MAX RX`) is enabled for new connections and proposes the maximum supported sizes, **2030 / 2030 bytes**, for the next HDLC connection. TX is transmission from the application; RX is reception by the application. Each value accepts `3–2030` bytes including LLC. The chain button between the fields links their edits in both directions and is enabled by default. Turning it on copies TX to RX; turn it off to enter different values. Loading equal sizes links the fields; loading different sizes unlinks them and preserves both values. The application uses one-frame TX/RX windows. The trace records the client proposal, the meter's UA values and the effective client limits, which may be smaller than requested. Disabling the option preserves empty SNRM behavior. Older configurations load with this option disabled. JSON stores enabled proposals under `channel.framing.hdlcLinkParameters`; Wrapper configurations omit them. This setting is independent of Max PDU.
 
